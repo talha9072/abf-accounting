@@ -1,26 +1,142 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * ABF New Companies — design tokens
+ * Source: Figma "ABF Accounting" → variables "App brand (Guru = Light · ABF)" (ABF mode)
+ * and "ABF / Brand — ACTIVE".
+ */
+@theme {
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand */
+  --color-brand: #03a84e;          /* brand/lavender (ABF) · primary actions */
+  --color-brand-hover: #02913f;
+  --color-brand-bright: #3bd85e;
+  --color-brand-fresh: #27c67a;
+  --color-navy: #0d333f;           /* brand/deep-navy */
+  --color-ink: #09242d;            /* brand/dark · text/primary · nav bg */
+  --color-muted: #64748b;          /* brand/mid · text/secondary */
+
+  /* Surfaces & neutrals */
+  --color-mint: #ebfbef;           /* brand/lavender-subtle · selected */
+  --color-canvas: #f3fbf5;         /* neutral/50 · page */
+  --color-n100: #eef5f0;
+  --color-n200: #e2ece5;
+  --color-line: #d6e7dc;           /* neutral/300 · borders */
+  --color-n400: #9fb3a8;
+  --color-n500: #7c8f86;
+
+  /* Status */
+  --color-info: #0d6e8a;
+  --color-info-subtle: #e3f4f8;
+  --color-warning: #c2410c;
+  --color-warning-subtle: #ffedd5;
+  --color-danger: #dc2626;
+  --color-danger-subtle: #fee2e2;
+  --color-coral: #ff7a6b;
+  --color-gold: #f5c451;
+
+  --shadow-soft: 0 10px 30px rgb(8 43 51 / 0.10);
+  --shadow-pop: 0 16px 40px rgb(9 36 45 / 0.14);
+  --shadow-nav: 0 0 14px rgb(3 168 78 / 0.45);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  /* Visible focus ring everywhere (design handoff §9: 2px dark teal) */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-navy);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--color-mint);
+    color: var(--color-ink);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Thin, branded scrollbars for scrolling table bodies */
+  .scroll-area {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-n400) var(--color-n100);
+  }
+  .scroll-area::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-area::-webkit-scrollbar-track {
+    background: var(--color-n100);
+    border-radius: 3px;
+  }
+  .scroll-area::-webkit-scrollbar-thumb {
+    background: var(--color-n400);
+    border-radius: 3px;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-toast-in {
+  animation: toast-in 180ms ease-out both;
+}
+.animate-pop-in {
+  animation: pop-in 140ms ease-out both;
+}
+.animate-fade-in {
+  animation: fade-in 140ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in,
+  .animate-pop-in,
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
 }
