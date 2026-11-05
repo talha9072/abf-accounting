@@ -10,6 +10,7 @@ import {
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
 import { Logo } from "@/components/brand/logo";
+import { usePull } from "@/components/admin/pull-center";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 
@@ -65,17 +66,41 @@ export function Sidebar() {
         })}
       </nav>
 
-      <Link
-        href="/new-companies?modal=pull"
-        title="Companies House connection — open the latest pull"
-        className="mt-auto flex flex-col gap-1.5 rounded-xl border border-white/12 bg-white/[0.06] px-4 py-3.5 transition-colors hover:bg-white/[0.1]"
-      >
-        <span className="flex items-center gap-2">
-          <span className="size-2 rounded-full bg-brand shadow-[0_0_6px_1px_rgb(38_199_122/0.55)]" />
-          <span className="text-[12px] font-medium leading-4">Companies House</span>
-        </span>
-        <span className="text-[11px] leading-[15px] text-white/62">Connected · checked at 06:00</span>
-      </Link>
+      <PullStatusCard />
     </aside>
+  );
+}
+
+function PullStatusCard() {
+  const { overview, running, open } = usePull();
+  const latest = overview.latest;
+  const failed = latest?.status === "failed";
+  const line = running
+    ? `Pulling new companies · ${latest?.percent ?? 0}%`
+    : failed
+      ? `Last pull failed · ${latest?.timeLabel}`
+      : latest
+        ? `Connected · checked at ${latest.timeLabel}`
+        : "Not pulled yet · runs at 06:00";
+
+  return (
+    <button
+      type="button"
+      onClick={() => open(failed && !running ? "pull-failed" : "pull")}
+      title="Companies House pull — open details"
+      className="mt-auto flex flex-col gap-1.5 rounded-xl border border-white/12 bg-white/[0.06] px-4 py-3.5 text-left transition-colors hover:bg-white/[0.1]"
+    >
+      <span className="flex items-center gap-2">
+        <span
+          className={cn(
+            "size-2 rounded-full",
+            failed && !running ? "bg-danger shadow-[0_0_6px_1px_rgb(220_38_38/0.55)]" : "bg-brand shadow-[0_0_6px_1px_rgb(38_199_122/0.55)]",
+            running && "animate-pulse",
+          )}
+        />
+        <span className="text-[12px] font-medium leading-4">Companies House</span>
+      </span>
+      <span className="text-[11px] leading-[15px] text-white/62">{line}</span>
+    </button>
   );
 }

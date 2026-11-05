@@ -23,4 +23,4 @@ const pool =
 if (process.env.NODE_ENV !== "production") globalForDb.__abfPool = pool;
 
 export const db = drizzle(pool, { schema });
-export { schema };
+export { schema, pool };

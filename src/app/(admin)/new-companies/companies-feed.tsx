@@ -18,11 +18,13 @@ import {
   faPrint,
   faShieldHalved,
   faTags,
+  faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
 import { FilterDropdown } from "@/components/admin/filter-dropdown";
 import { DataRow, DataTable, Pager } from "@/components/admin/table";
-import { ExportModal, FixAddressModal, PullFailedModal, PullModal } from "@/components/admin/company-modals";
+import { ExportModal, FixAddressModal } from "@/components/admin/company-modals";
+import { usePull, usePullHeadline } from "@/components/admin/pull-center";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/controls";
 import { DotState } from "@/components/ui/badge";
@@ -36,11 +38,13 @@ import { companies, feedCounts, type CompanyRow } from "@/lib/mock-data";
 const COLUMNS =
   "28px minmax(220px,388fr) 96px 150px minmax(220px,300fr) 104px minmax(170px,220fr) 96px 84px";
 
-type ModalKey = "export" | "fix" | "pull" | "pull-failed" | null;
+type ModalKey = "export" | "fix" | null;
 
 export function CompaniesFeed({ view, initialModal }: { view: string; initialModal: ModalKey }) {
   const router = useRouter();
   const toast = useToast();
+  const pull = usePullHeadline();
+  const { open: openPull } = usePull();
   const [modal, setModal] = useState<ModalKey>(initialModal);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(
@@ -89,11 +93,43 @@ export function CompaniesFeed({ view, initialModal }: { view: string; initialMod
         }
       />
 
-      {/* Today's pull banner */}
-      <div className="flex min-h-[46px] flex-wrap items-center gap-2.5 rounded-[10px] bg-mint px-3.5 py-2 text-ink">
-        <Icon icon={faShieldHalved} size={13} />
+      {/* Today's pull banner — live from the latest pull */}
+      <div
+        className={
+          pull.failed && !pull.running
+            ? "flex min-h-[46px] flex-wrap items-center gap-2.5 rounded-[10px] bg-danger-subtle px-3.5 py-2 text-[#7f1d1d]"
+            : "flex min-h-[46px] flex-wrap items-center gap-2.5 rounded-[10px] bg-mint px-3.5 py-2 text-ink"
+        }
+      >
+        <Icon icon={pull.failed && !pull.running ? faTriangleExclamation : faShieldHalved} size={13} />
         <p className="flex-1 text-[12px] font-medium leading-4">
-          Today’s pull: 2,346 new companies found at 06:00 · excluded companies are skipped automatically
+          {pull.running ? (
+            <>Pulling new companies from Companies House… the list updates when it finishes</>
+          ) : pull.failed ? (
+            <>
+              {pull.failedManual
+                ? `The last “Run pull now” didn’t finish (${pull.lastCheck}) — nothing was changed.`
+                : `Today’s pull didn’t finish (${pull.lastCheck}) — it retries every 30 minutes.`}{" "}
+              <button type="button" onClick={() => openPull("pull-failed")} className="font-bold underline">
+                Details
+              </button>
+            </>
+          ) : pull.time ? (
+            <>
+              Latest pull: {pull.found.toLocaleString("en-GB")} new companies found at {pull.time} ·{" "}
+              {pull.ready.toLocaleString("en-GB")} ready for a letter · excluded companies are skipped automatically
+            </>
+          ) : (
+            <>No pull has run yet — the first one runs at 06:00 (South Africa time), or start it now.</>
+          )}
+          {!pull.running && !pull.failed ? (
+            <>
+              {" "}
+              <button type="button" onClick={() => openPull("pull")} className="font-bold underline underline-offset-2">
+                {pull.time ? "Pull details" : "Run pull now"}
+              </button>
+            </>
+          ) : null}
         </p>
         <Link
           href="/history?tab=excluded"
@@ -250,8 +286,6 @@ export function CompaniesFeed({ view, initialModal }: { view: string; initialMod
 
       <ExportModal open={modal === "export"} onClose={() => setModal(null)} selected={selected.size} />
       <FixAddressModal open={modal === "fix"} onClose={() => setModal(null)} />
-      <PullModal open={modal === "pull"} onClose={() => setModal(null)} />
-      <PullFailedModal open={modal === "pull-failed"} onClose={() => setModal(null)} />
     </>
   );
 }

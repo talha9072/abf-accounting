@@ -8,6 +8,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -126,6 +127,8 @@ export const letterState = pgEnum("letter_state", [
   "posted",
   "excluded",
   "address_issue",
+  /** Failed a selection rule (wrong company type, agent address …) — never gets a letter. */
+  "skipped",
 ]);
 
 export const companies = pgTable(
@@ -136,7 +139,8 @@ export const companies = pgTable(
     name: varchar("name", { length: 300 }).notNull(),
     companyType: varchar("company_type", { length: 64 }).notNull(), // ltd, llp, plc …
     companyStatus: varchar("company_status", { length: 32 }).notNull().default("active"),
-    incorporatedOn: timestamp("incorporated_on", { mode: "date", withTimezone: false }).notNull(),
+    /** UK calendar date, "YYYY-MM-DD". */
+    incorporatedOn: date("incorporated_on", { mode: "string" }).notNull(),
     sicCodes: jsonb("sic_codes").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     /** Registered office exactly as Companies House returned it. */
     registeredOffice: jsonb("registered_office").$type<Address>().notNull(),
@@ -146,6 +150,10 @@ export const companies = pgTable(
     directorFullName: varchar("director_full_name", { length: 240 }),
     letterState: letterState("letter_state").notNull().default("not_reviewed"),
     eligibility: jsonb("eligibility").$type<Record<string, boolean>>(),
+    /** First failed rule, e.g. "shared_address" — null when every rule passed. */
+    skipReason: varchar("skip_reason", { length: 48 }),
+    /** True once officers were fetched (director name filled or confirmed missing). */
+    officersFetched: boolean("officers_fetched").notNull().default(false),
     importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow(),
     pullId: uuid("pull_id").references(() => pulls.id, { onDelete: "set null" }),
     raw: jsonb("raw"),
@@ -156,6 +164,7 @@ export const companies = pgTable(
     uniqueIndex("companies_number_unique").on(t.companyNumber),
     index("companies_state_idx").on(t.letterState),
     index("companies_incorporated_idx").on(t.incorporatedOn),
+    index("companies_pull_idx").on(t.pullId),
   ],
 );
 
@@ -167,21 +176,38 @@ export type Address = {
   country?: string | null;
 };
 
-/** Daily (06:00) and manual Companies House pulls. */
-export const pulls = pgTable("pulls", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  status: varchar("status", { length: 16 }).notNull(), // running | succeeded | failed
-  trigger: varchar("trigger", { length: 16 }).notNull().default("schedule"), // schedule | manual
-  fromDate: timestamp("from_date", { mode: "date" }).notNull(),
-  toDate: timestamp("to_date", { mode: "date" }).notNull(),
-  pagesTotal: integer("pages_total"),
-  pagesDone: integer("pages_done").notNull().default(0),
-  companiesFound: integer("companies_found").notNull().default(0),
-  retries: integer("retries").notNull().default(0),
-  error: text("error"),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-  finishedAt: timestamp("finished_at", { withTimezone: true }),
-});
+/** Daily (06:00 South Africa time) and manual Companies House pulls. */
+export const pulls = pgTable(
+  "pulls",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    status: varchar("status", { length: 16 }).notNull(), // running | succeeded | failed
+    trigger: varchar("trigger", { length: 16 }).notNull().default("schedule"), // schedule | manual | retry
+    /** fetch → rules → officers → done */
+    stage: varchar("stage", { length: 16 }).notNull().default("fetch"),
+    /** Incorporation dates covered (UK dates, inclusive). */
+    fromDate: date("from_date", { mode: "string" }).notNull(),
+    toDate: date("to_date", { mode: "string" }).notNull(),
+    pagesTotal: integer("pages_total"),
+    pagesDone: integer("pages_done").notNull().default(0),
+    companiesFound: integer("companies_found").notNull().default(0),
+    companiesNew: integer("companies_new").notNull().default(0),
+    companiesEligible: integer("companies_eligible").notNull().default(0),
+    officersTotal: integer("officers_total").notNull().default(0),
+    officersDone: integer("officers_done").notNull().default(0),
+    /** Attempt number for this day's pull (1 = first try). */
+    attempt: integer("attempt").notNull().default(1),
+    /** Kept for compatibility with earlier code; equals attempt - 1. */
+    retries: integer("retries").notNull().default(0),
+    error: text("error"),
+    failureEmailedAt: timestamp("failure_emailed_at", { withTimezone: true }),
+    startedBy: uuid("started_by").references(() => users.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("pulls_started_idx").on(t.startedAt), index("pulls_status_idx").on(t.status)],
+);
 
 /** Do-not-contact list (Exclude). */
 export const exclusions = pgTable(

@@ -67,6 +67,26 @@ In development, password-reset emails are printed to the terminal running `npm r
 - **Registration:** only `ALLOWED_SIGNUP_DOMAINS` emails; first account becomes admin; turn off with `REGISTRATION_ENABLED=false`.
 - **Other:** Server Actions (built-in Origin/CSRF check), zod validation on every input, safe `next=` redirects only, strict security headers + CSP (`next.config.ts`), `Cache-Control: no-store` on signed-in pages, `proxy.ts` guard + DAL check in every layout/action.
 
+## Companies House pull
+
+Every day at **06:00 South Africa time** (`Africa/Johannesburg`) the app pulls every company incorporated since the last successful pull, using the read-only Companies House REST API (`COMPANIES_HOUSE_API_KEY`).
+
+1. **Fetch** — advanced company search, day by day, 5,000 per page. One day of overlap catches late-indexed companies; up to 14 missed days are caught up automatically.
+2. **Rules** — the 7 checks from the design (`src/lib/pull/eligibility.ts`): Ltd/LLP, complete UK address, not your own office, not a shared/agent address (≥ 5 companies at one address in 14 days), not the Companies House default address, not excluded, not printed before. Results: `not_reviewed` (ready), `address_issue`, `excluded`, `skipped` + `skip_reason`.
+3. **Directors** — one officers call per ready company to get the first active director's name for the letter.
+4. **Done** — counts saved on the `pulls` row, in-app notifications added.
+
+Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s) and the `X-Ratelimit-*` headers are respected; 429s wait for the reset, 5xx/network errors retry with backoff. A typical day (~2,700 companies) takes ~15–20 min, mostly director names.
+
+**Failures:** retried every 30 minutes (up to 12 times a day). After the 3rd failed attempt, everyone with "Email me if the morning pull fails" gets one email. A Postgres advisory lock guarantees only one pull runs at a time; a pull killed by a restart is marked *Interrupted* and redone.
+
+**How it's triggered** (`PULL_SCHEDULER` in `.env`):
+- `internal` (default) — the Next.js server checks every minute (`src/instrumentation.ts`). Use on a long-running Node server (`next start`, PM2, cPanel Node app).
+- `external` — run `npm run pull` from cron (e.g. every 10 minutes; it only pulls when due), or call `GET /api/cron/pull` with `Authorization: Bearer $CRON_SECRET`.
+- Anyone signed in can press **Run pull now** (sidebar → Companies House card); manual pulls include today.
+
+`npm run pull -- --now` forces a manual pull from the terminal. `npx tsx scripts/test-eligibility.ts` checks the rules.
+
 ## Going live — database
 
 All schema changes are plain SQL files in **`/drizzle`** (`0000_init.sql`, …). They are the source of truth for the live database.

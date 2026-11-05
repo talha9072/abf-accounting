@@ -3,7 +3,8 @@ import { CompaniesFeed } from "./companies-feed";
 
 export const metadata: Metadata = { title: "New Companies" };
 
-const MODALS = ["export", "fix", "pull", "pull-failed"] as const;
+// "pull" / "pull-failed" deep links are handled by <PullProvider> in the admin layout.
+const MODALS = ["export", "fix"] as const;
 
 export default async function NewCompaniesPage({ searchParams }: PageProps<"/new-companies">) {
   const sp = await searchParams;

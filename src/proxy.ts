@@ -10,6 +10,12 @@ const PUBLIC_PATHS = ["/sign-in", "/register", "/forgot-password", "/reset-passw
 
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  // API routes authenticate themselves (session check or cron secret) and answer 401, not a redirect.
+  if (pathname.startsWith("/api/")) {
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "private, no-store");
+    return res;
+  }
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const hasSession = SESSION_COOKIES.some((name) => request.cookies.has(name));
 
