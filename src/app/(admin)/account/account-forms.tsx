@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { faCheck, faKey, faLock, faRightFromBracket, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { Button, buttonClasses } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Icon } from "@/components/ui/icon";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { changePasswordAction, signOutOtherDevicesAction, type FormState } from "@/lib/auth/actions";
+import { saveDetailsAction, saveEmailPrefsAction } from "@/lib/account-actions";
 import type { getMyAccount } from "@/lib/account";
 
 type Account = Awaited<ReturnType<typeof getMyAccount>>;
@@ -24,8 +26,13 @@ function relative(iso: string) {
 
 export function AccountForms({ account }: { account: Account }) {
   const toast = useToast();
+  const router = useRouter();
   const [pwOpen, setPwOpen] = useState(false);
   const [otherState, signOutOthers] = useActionState<FormState, FormData>(signOutOtherDevicesAction, null);
+  const [detailErrors, setDetailErrors] = useState<Record<string, string>>({});
+  const [savingDetails, startDetails] = useTransition();
+  const [pullEmail, setPullEmail] = useState(account.emailOnPullFailure);
+  const [savingPrefs, startPrefs] = useTransition();
 
   useEffect(() => {
     if (otherState?.message) toast({ message: otherState.message });
@@ -44,8 +51,19 @@ export function AccountForms({ account }: { account: Account }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            toast({ message: "Your details were saved" });
+            const f = new FormData(e.currentTarget);
+            startDetails(async () => {
+              const r = await saveDetailsAction({
+                firstName: String(f.get("firstName") ?? ""),
+                lastName: String(f.get("lastName") ?? ""),
+                mobile: String(f.get("mobile") ?? ""),
+              });
+              setDetailErrors(r.ok ? {} : (r.fieldErrors ?? {}));
+              toast({ message: r.message });
+              if (r.ok) router.refresh();
+            });
           }}
+          noValidate
           className="flex flex-col gap-4 rounded-2xl border border-line bg-white p-6"
         >
           <div className="flex items-center justify-between gap-4">
@@ -59,16 +77,37 @@ export function AccountForms({ account }: { account: Account }) {
             Only you and your admins can see this. Your name appears in activity logs and notes.
           </p>
           <div className="grid gap-4 md:grid-cols-2">
-            <Field label="First name" htmlFor="acc-first">
-              <Input id="acc-first" name="firstName" defaultValue={account.firstName} autoComplete="given-name" maxLength={80} required />
+            <Field label="First name" htmlFor="acc-first" error={detailErrors.firstName}>
+              <Input
+                id="acc-first"
+                name="firstName"
+                defaultValue={account.firstName}
+                autoComplete="given-name"
+                maxLength={80}
+                required
+                aria-invalid={!!detailErrors.firstName}
+              />
             </Field>
-            <Field label="Last name" htmlFor="acc-last">
-              <Input id="acc-last" name="lastName" defaultValue={account.lastName} autoComplete="family-name" maxLength={80} required />
+            <Field label="Last name" htmlFor="acc-last" error={detailErrors.lastName}>
+              <Input
+                id="acc-last"
+                name="lastName"
+                defaultValue={account.lastName}
+                autoComplete="family-name"
+                maxLength={80}
+                required
+                aria-invalid={!!detailErrors.lastName}
+              />
             </Field>
             <Field label="Work email" htmlFor="acc-email" hint="Used to sign in and for password resets">
               <Input id="acc-email" type="email" name="email" defaultValue={account.email} autoComplete="email" readOnly />
             </Field>
-            <Field label="Mobile (optional)" htmlFor="acc-mobile" hint="Only used for sign-in codes">
+            <Field
+              label="Mobile (optional)"
+              htmlFor="acc-mobile"
+              hint={account.mobileMasked ? "Hidden for privacy — type a new number to replace it, or clear it" : "Only used for sign-in codes"}
+              error={detailErrors.mobile}
+            >
               <Input
                 id="acc-mobile"
                 type="tel"
@@ -77,11 +116,12 @@ export function AccountForms({ account }: { account: Account }) {
                 placeholder="07700 900000"
                 autoComplete="tel"
                 maxLength={32}
+                aria-invalid={!!detailErrors.mobile}
               />
             </Field>
           </div>
-          <Button type="submit" icon={faCheck} className="self-end">
-            Save details
+          <Button type="submit" icon={savingDetails ? faSpinner : faCheck} disabled={savingDetails} className="self-end">
+            {savingDetails ? "Saving…" : "Save details"}
           </Button>
         </form>
 
@@ -93,8 +133,8 @@ export function AccountForms({ account }: { account: Account }) {
               Change password
             </Button>
           </Row>
-          <Row title="Two-step sign-in" sub="Ask for a code from your phone when signing in on a new computer">
-            <Toggle label="Two-step sign-in" defaultChecked={account.twoFactorEnabled} />
+          <Row title="Two-step sign-in" sub="Coming soon — codes from an authenticator app when signing in on a new computer">
+            <Toggle label="Two-step sign-in (coming soon)" checked={account.twoFactorEnabled} disabled readOnly className="cursor-not-allowed opacity-50" />
           </Row>
           <Row title="Signed-in devices" sub={devicesLine}>
             <form action={signOutOthers}>
@@ -108,16 +148,19 @@ export function AccountForms({ account }: { account: Account }) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          toast({ message: "Email preferences saved" });
+          startPrefs(async () => {
+            const r = await saveEmailPrefsAction({ emailOnPullFailure: pullEmail });
+            toast({ message: r.message });
+          });
         }}
         className="flex flex-col gap-4 rounded-2xl border border-line bg-white p-6"
       >
         <h2 className="text-[18px] font-bold leading-[25px] text-ink">Emails</h2>
         <Row title="Email me if the morning pull fails" sub="So letters aren’t delayed">
-          <Toggle label="Email me if the morning pull fails" defaultChecked={account.emailOnPullFailure} />
+          <Toggle label="Email me if the morning pull fails" checked={pullEmail} onChange={(e) => setPullEmail(e.target.checked)} />
         </Row>
-        <Button type="submit" icon={faCheck} className="self-end">
-          Save preferences
+        <Button type="submit" icon={savingPrefs ? faSpinner : faCheck} disabled={savingPrefs} className="self-end">
+          {savingPrefs ? "Saving…" : "Save preferences"}
         </Button>
       </form>
 

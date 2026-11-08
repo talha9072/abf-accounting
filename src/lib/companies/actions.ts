@@ -5,6 +5,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { activityEvents, companies, exclusions } from "@/lib/db/schema";
 import { getCurrentSession } from "@/lib/auth/dal";
+import { notify } from "@/lib/notifications/server";
+import { formatCompanyName } from "./format";
 import { matchingCompanyNumbers, parseFeedFilters } from "./queries";
 
 export type ActionResult = { ok: true; count: number; numbers: string[] } | { ok: false; message: string };
@@ -61,6 +63,8 @@ export async function excludeCompaniesAction(target: Target, reason?: string): P
       );
     }
     await logActivity(rows, user.id, "excluded", "Excluded", `By ${user.firstName} ${user.lastName}`);
+    const what = rows.length === 1 ? formatCompanyName(rows[0].name) : `${rows.length} companies`;
+    await notify("excluded", "Exclude added", `${what} · by ${user.firstName} ${user.lastName}`);
   }
   return { ok: true, count: rows.length, numbers: rows.map((r) => r.number) };
 }

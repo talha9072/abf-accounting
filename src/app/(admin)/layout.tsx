@@ -5,10 +5,11 @@ import { ToastProvider } from "@/components/ui/toast";
 import { requireUser } from "@/lib/auth/dal";
 import { getPullOverview } from "@/lib/pull/status";
 import { sidebarCounts } from "@/lib/companies/queries";
+import { listNotifications } from "@/lib/notifications/server";
 
 export default async function AdminLayout({ children }: LayoutProps<"/">) {
   const user = await requireUser();
-  const [pullOverview, counts] = await Promise.all([getPullOverview(), sidebarCounts()]);
+  const [pullOverview, counts, notifications] = await Promise.all([getPullOverview(), sidebarCounts(), listNotifications(user.id)]);
   const name = `${user.firstName} ${user.lastName}`.trim();
   const initials = `${user.firstName[0] ?? ""}${user.lastName[0] ?? ""}`.toUpperCase();
 
@@ -18,7 +19,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/">) {
         <div className="flex min-h-screen bg-canvas">
           <Sidebar counts={counts} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <Topbar user={{ name, email: user.email, initials }} />
+            <Topbar user={{ name, email: user.email, initials }} notifications={notifications} />
             <main id="main" className="flex flex-1 flex-col gap-[18px] px-9 pb-[30px] pt-7">
               {children}
             </main>

@@ -7,6 +7,7 @@ import { activityEvents, companies, printRunItems, printRuns } from "@/lib/db/sc
 import { getCurrentSession } from "@/lib/auth/dal";
 import { buildLetterSnapshot, getBusiness, getPrintableTemplate } from "@/lib/letters/data";
 import { dateInTz, UK_TZ } from "@/lib/pull/dates";
+import { notify } from "@/lib/notifications/server";
 
 export type RunResult = { ok: true; runId: string; reference: string; letters: number } | { ok: false; message: string };
 export type SimpleResult = { ok: true; count: number } | { ok: false; message: string };
@@ -147,6 +148,11 @@ export async function confirmRunAction(runId: string): Promise<SimpleResult> {
     return updated;
   });
   if (!rows.length) return { ok: false, message: "This print run was already confirmed or cancelled." };
+  await notify(
+    "print_confirmed",
+    "Print run confirmed",
+    `${rows.length} ${rows.length === 1 ? "letter" : "letters"} marked posted · by ${user.firstName} ${user.lastName}`,
+  );
   return { ok: true, count: rows.length };
 }
 

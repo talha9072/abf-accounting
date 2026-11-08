@@ -51,6 +51,8 @@ export const users = pgTable(
     status: userStatus("status").notNull().default("active"),
     twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
     emailOnPullFailure: boolean("email_on_pull_failure").notNull().default(true),
+    /** Notifications created after this are "unread" for this user. */
+    notificationsSeenAt: timestamp("notifications_seen_at", { withTimezone: true }),
     /** Consecutive failed sign-ins; reset on success. */
     failedLoginCount: integer("failed_login_count").notNull().default(0),
     lockedUntil: timestamp("locked_until", { withTimezone: true }),

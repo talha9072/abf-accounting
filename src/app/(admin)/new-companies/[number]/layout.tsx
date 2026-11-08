@@ -20,7 +20,8 @@ import { ButtonLink } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import type { CompanyDetail } from "@/lib/companies/queries";
 import { formatDate, sicDescription } from "@/lib/companies/format";
-import { formatSaTime } from "@/lib/pull/dates";
+import { companyLetters, type CompanyLetter } from "@/lib/print/queries";
+import { dateInTz, formatSaTime, SCHEDULE_TZ } from "@/lib/pull/dates";
 import { cn } from "@/lib/cn";
 import { CompanyActions } from "./company-actions";
 import { CompanyTabs } from "./company-tabs";
@@ -32,6 +33,7 @@ export default async function CompanyLayout({ children, params }: LayoutProps<"/
   if (!c) notFound();
 
   const badge = STATE_BADGE[c.state];
+  const latest = (await companyLetters(c.id)).find((l) => l.status !== "cancelled") ?? null;
   const primarySic = c.sicCodes[0];
 
   return (
@@ -112,13 +114,13 @@ export default async function CompanyLayout({ children, params }: LayoutProps<"/
           <SummaryItem
             icon={faPaperPlane}
             label="Letter"
-            value={c.state === "printed" || c.state === "posted" ? "Printed" : "Not printed yet"}
-            sub={c.state === "excluded" ? "Excluded" : c.state === "skipped" ? "Won’t get a letter" : "Not excluded"}
+            value={latest ? `Printed ${latest.printedDay}` : "Not printed yet"}
+            sub={latest ? (latest.confirmedDay ? `Posted ${latest.confirmedDay} · ${latest.runReference}` : `${latest.runReference} · not confirmed yet`) : c.state === "excluded" ? "Excluded" : c.state === "skipped" ? "Won’t get a letter" : "Not excluded"}
           />
         </div>
       </section>
 
-      <LetterJourney c={c} />
+      <LetterJourney c={c} latest={latest} />
       <CompanyTabs number={c.number} />
       {children}
     </>
@@ -158,7 +160,7 @@ function SummaryItem({
   );
 }
 
-function LetterJourney({ c }: { c: CompanyDetail }) {
+function LetterJourney({ c, latest }: { c: CompanyDetail; latest: CompanyLetter | null }) {
   const blocked = c.state === "excluded" || c.state === "skipped" || c.state === "address_issue";
   const failed = c.checks.find((x) => !x.passed);
   const order = ["found", "checked", "run", "printed", "posted"] as const;
@@ -166,15 +168,15 @@ function LetterJourney({ c }: { c: CompanyDetail }) {
     c.state === "posted" ? 4 : c.state === "printed" ? 3 : c.state === "added" ? 2 : blocked ? 1 : 1;
 
   const steps = [
-    { key: "found", label: "Found", sub: `${c.incorporated} · ${formatSaTime(c.importedAt)}` },
+    { key: "found", label: "Found", sub: `${formatDate(dateInTz(c.importedAt, SCHEDULE_TZ))} · ${formatSaTime(c.importedAt)}` },
     {
       key: "checked",
       label: blocked ? (c.state === "excluded" ? "Excluded" : c.state === "address_issue" ? "Address issue" : "Skipped") : "Checked",
       sub: blocked ? (c.state === "excluded" ? "On the do-not-contact list" : failed?.label ?? "Skipped by hand") : `Passed all ${c.checks.length} checks`,
     },
-    { key: "run", label: c.state === "added" ? "In today’s print run" : "Print run", sub: c.state === "added" ? "Waiting to print" : "—" },
-    { key: "printed", label: "Printed", sub: "—" },
-    { key: "posted", label: "Posted", sub: "—" },
+    { key: "run", label: c.state === "added" ? "In today’s print run" : "Print run", sub: c.state === "added" ? "Waiting to print" : latest ? `${latest.runReference} · ${latest.template}` : "—" },
+    { key: "printed", label: "Printed", sub: latest ? `${latest.printedAt} · ${latest.printedBy}` : "—" },
+    { key: "posted", label: "Posted", sub: latest?.confirmedAt ?? (latest ? "Waiting for confirmation" : "—") },
   ];
 
   const next =

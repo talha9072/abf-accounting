@@ -49,7 +49,7 @@ export function Popover({
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     const onScroll = (e: Event) => {
-      if (fixed && !panelRef.current?.contains(e.target as Node)) setOpen(false);
+      if (fixed && !(e.target instanceof Node && panelRef.current?.contains(e.target))) setOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);

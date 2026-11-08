@@ -1,15 +1,19 @@
 import "server-only";
 import { and, asc, count, desc, eq, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { companies, exclusions, printRunItems, printRuns, users } from "@/lib/db/schema";
+import { companies, exclusions, printRunItems, printRuns, users, type LetterSnapshot } from "@/lib/db/schema";
+import { cache } from "react";
 import { formatAddress, formatCompanyName, formatDate, postingAddress } from "@/lib/companies/format";
-import { formatSaTime } from "@/lib/pull/dates";
+import { dateInTz, formatSaTime, SCHEDULE_TZ } from "@/lib/pull/dates";
 
 const who = (first: string | null, last: string | null) => (first ? `${first} ${last ?? ""}`.trim() : "—");
 
+/** Calendar day in SA time (where the team works), e.g. "8 Nov 2026". */
+const saDay = (d: Date) => formatDate(dateInTz(d, SCHEDULE_TZ));
+
 function runWhen(d: Date | null) {
   if (!d) return "—";
-  return `${formatDate(d.toISOString())} · ${formatSaTime(d)}`;
+  return `${saDay(d)} · ${formatSaTime(d)}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -115,7 +119,7 @@ function toRunSummary(r: {
     template: r.template ?? "—",
     printedBy: who(r.first, r.last),
     printedAt: runWhen(r.printedAt),
-    printedDay: r.printedAt ? formatDate(r.printedAt.toISOString()) : "—",
+    printedDay: r.printedAt ? saDay(r.printedAt) : "—",
     confirmedAt: r.confirmedAt ? runWhen(r.confirmedAt) : null,
     labelsPrinted: Boolean(r.labelsPrintedAt),
   };
@@ -215,7 +219,7 @@ export async function historySent(q: string, limit = 50, offset = 0) {
     name: formatCompanyName(r.name),
     director: r.director ?? "—",
     address: formatAddress(r.address),
-    sentOn: r.printedAt ? formatDate(r.printedAt.toISOString()) : "—",
+    sentOn: r.printedAt ? saDay(r.printedAt) : "—",
     runId: r.runId,
     printRun: r.reference,
     printedBy: who(r.first, r.last),
@@ -245,7 +249,7 @@ export async function historyExcluded(q: string, limit = 50, offset = 0) {
     name: formatCompanyName(r.name ?? r.number ?? ""),
     reason: r.reason ?? "—",
     by: who(r.first, r.last),
-    date: formatDate(r.at.toISOString()),
+    date: saDay(r.at),
   }));
 }
 
@@ -276,3 +280,65 @@ export async function historyNotSent(q: string, limit = 50, offset = 0) {
     skipReason: r.skipReason,
   }));
 }
+
+/* ------------------------------------------------------------------ */
+/* One company's letters                                               */
+/* ------------------------------------------------------------------ */
+
+export type CompanyLetter = {
+  runId: string;
+  runReference: string;
+  /** printed · confirmed · cancelled */
+  status: string;
+  template: string;
+  position: number;
+  reference: string;
+  printedBy: string;
+  printedAt: string;
+  printedDay: string;
+  confirmedAt: string | null;
+  confirmedDay: string | null;
+  cancelledDay: string | null;
+  letter: LetterSnapshot | null;
+};
+
+/** Every print run this company was in, newest first (shared by the layout and tabs per request). */
+export const companyLetters = cache(async (companyId: string): Promise<CompanyLetter[]> => {
+  const rows = await db
+    .select({
+      runId: printRuns.id,
+      runReference: printRuns.reference,
+      status: printRuns.status,
+      template: printRuns.templateName,
+      printedAt: printRuns.printedAt,
+      confirmedAt: printRuns.confirmedAt,
+      cancelledAt: printRuns.cancelledAt,
+      createdAt: printRuns.createdAt,
+      position: printRunItems.position,
+      reference: printRunItems.reference,
+      letter: printRunItems.letter,
+      first: users.firstName,
+      last: users.lastName,
+    })
+    .from(printRunItems)
+    .innerJoin(printRuns, eq(printRunItems.printRunId, printRuns.id))
+    .leftJoin(users, eq(printRuns.printedBy, users.id))
+    .where(eq(printRunItems.companyId, companyId))
+    .orderBy(desc(printRuns.createdAt))
+    .limit(50);
+  return rows.map((r) => ({
+    runId: r.runId,
+    runReference: r.runReference,
+    status: r.status,
+    template: r.template ?? "—",
+    position: r.position,
+    reference: r.reference,
+    printedBy: who(r.first, r.last),
+    printedAt: runWhen(r.printedAt ?? r.createdAt),
+    printedDay: saDay(r.printedAt ?? r.createdAt),
+    confirmedAt: r.confirmedAt ? runWhen(r.confirmedAt) : null,
+    confirmedDay: r.confirmedAt ? saDay(r.confirmedAt) : null,
+    cancelledDay: r.cancelledAt ? saDay(r.cancelledAt) : null,
+    letter: r.letter,
+  }));
+});

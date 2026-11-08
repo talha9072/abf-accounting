@@ -14,17 +14,20 @@ import {
   faMagnifyingGlass,
   faPrint,
   faRightFromBracket,
+  faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/button";
 import { MenuItem, Popover } from "@/components/ui/popover";
 import { signOutAction } from "@/lib/auth/actions";
-import { notificationsList } from "@/lib/mock-data";
+import { getNotificationsAction, markAllReadAction } from "@/lib/notifications/actions";
+import type { NotificationItem } from "@/lib/notifications/server";
 import { cn } from "@/lib/cn";
 
 export type TopbarUser = { name: string; email: string; initials: string };
+type NotificationsData = { items: NotificationItem[]; unread: number };
 
-export function Topbar({ user }: { user: TopbarUser }) {
+export function Topbar({ user, notifications }: { user: TopbarUser; notifications: NotificationsData }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [isMac, setIsMac] = useState(false);
 
@@ -59,7 +62,7 @@ export function Topbar({ user }: { user: TopbarUser }) {
       </div>
 
       <div className="flex items-center gap-3">
-        <NotificationsMenu />
+        <NotificationsMenu initial={notifications} />
         <AccountMenu user={user} />
       </div>
     </header>
@@ -208,43 +211,81 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
 /* Notifications                                                       */
 /* ------------------------------------------------------------------ */
 
-const NOTE_ICON = {
-  success: { icon: faCircleCheck, cls: "text-brand" },
-  address: { icon: faLocationDot, cls: "text-warning" },
+const NOTE_ICON: Record<string, { icon: typeof faBell; cls: string }> = {
+  pull_complete: { icon: faCircleCheck, cls: "text-brand" },
+  address_issues: { icon: faLocationDot, cls: "text-warning" },
+  pull_failed: { icon: faTriangleExclamation, cls: "text-danger" },
   excluded: { icon: faBan, cls: "text-muted" },
-  print: { icon: faPrint, cls: "text-muted" },
+  print_confirmed: { icon: faPrint, cls: "text-muted" },
 };
 
-function NotificationsMenu() {
-  const [unread, setUnread] = useState(true);
+function NotificationsMenu({ initial }: { initial: NotificationsData }) {
+  const [data, setData] = useState(initial);
+
+  const refresh = async () => {
+    const d = await getNotificationsAction();
+    if (d) setData(d);
+  };
+
+  // Light polling so a finished pull or a teammate's action shows up without a reload.
+  useEffect(() => {
+    const t = setInterval(async () => {
+      const d = await getNotificationsAction();
+      if (d) setData(d);
+    }, 120_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const markAll = async () => {
+    setData((d) => ({ unread: 0, items: d.items.map((i) => ({ ...i, unread: false })) }));
+    await markAllReadAction();
+  };
+
   return (
     <Popover
       panelClassName="w-[380px]"
       trigger={({ toggle, open }) => (
-        <IconButton icon={faBell} label="Notifications" onClick={toggle} aria-expanded={open} badge={unread} />
+        <IconButton
+          icon={faBell}
+          label={data.unread ? `Notifications (${data.unread} unread)` : "Notifications"}
+          onClick={() => {
+            if (!open) void refresh();
+            toggle();
+          }}
+          aria-expanded={open}
+          badge={data.unread > 0}
+        />
       )}
     >
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center justify-between px-3 py-2">
           <p className="text-[15px] font-bold leading-5 text-ink">Notifications</p>
-          <button type="button" onClick={() => setUnread(false)} className="text-[12px] font-medium text-brand hover:underline">
-            Mark all read
-          </button>
+          {data.unread > 0 ? (
+            <button type="button" onClick={() => void markAll()} className="text-[12px] font-medium text-brand hover:underline">
+              Mark all read
+            </button>
+          ) : null}
         </div>
-        {notificationsList.map((n) => {
-          const meta = NOTE_ICON[n.kind];
-          return (
-            <div key={n.title} className={cn("flex gap-3 rounded-lg px-3 py-2.5", n.unread && unread && "bg-mint")}>
-              <span className={cn("mt-[3px] flex w-3 justify-center", meta.cls)}>
-                <Icon icon={meta.icon} size={12} />
-              </span>
-              <div className="flex flex-col gap-0.5">
-                <p className="text-[13px] font-medium leading-[18px] text-ink">{n.title}</p>
-                <p className="text-[11px] leading-[15px] text-muted">{n.detail}</p>
+        {data.items.length === 0 ? (
+          <p className="px-3 pb-3 pt-1 text-[12px] text-muted">Nothing yet — pulls, print runs and exclusions show up here.</p>
+        ) : (
+          data.items.map((n) => {
+            const meta = NOTE_ICON[n.kind] ?? { icon: faBell, cls: "text-muted" };
+            return (
+              <div key={n.id} className={cn("flex gap-3 rounded-lg px-3 py-2.5", n.unread && "bg-mint")}>
+                <span className={cn("mt-[3px] flex w-3 justify-center", meta.cls)}>
+                  <Icon icon={meta.icon} size={12} />
+                </span>
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <p className="text-[13px] font-medium leading-[18px] text-ink">{n.title}</p>
+                  <p className="truncate text-[11px] leading-[15px] text-muted" title={n.detail}>
+                    {n.detail}
+                  </p>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
     </Popover>
   );

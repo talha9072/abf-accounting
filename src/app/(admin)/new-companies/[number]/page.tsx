@@ -6,10 +6,12 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { formatAddress, formatDate, sicLabel } from "@/lib/companies/format";
 import { getCompanyActivity } from "@/lib/companies/queries";
+import { latestNote } from "@/lib/notes/queries";
+import { companyLetters } from "@/lib/print/queries";
 import { formatSaTime } from "@/lib/pull/dates";
 import { cn } from "@/lib/cn";
 import { ExcludeCard } from "./company-actions";
-import { loadCompany, STATE_BADGE } from "./data";
+import { loadCompany, requireCompany, runBadge, STATE_BADGE } from "./data";
 import { ActivityTimeline } from "./parts";
 
 export async function generateMetadata({ params }: PageProps<"/new-companies/[number]">): Promise<Metadata> {
@@ -19,8 +21,8 @@ export async function generateMetadata({ params }: PageProps<"/new-companies/[nu
 
 export default async function CompanyOverviewPage({ params }: PageProps<"/new-companies/[number]">) {
   const { number } = await params;
-  const c = (await loadCompany(number))!;
-  const activity = await getCompanyActivity(c);
+  const c = await requireCompany(number);
+  const [activity, note, letters] = await Promise.all([getCompanyActivity(c), latestNote(c.id), companyLetters(c.id)]);
   const badge = STATE_BADGE[c.state];
 
   const left: Array<[string, string, string?]> = [
@@ -116,8 +118,44 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
         </Card>
 
         <Card padding="p-[18px]">
-          <CardHeader size="sm" title="Print history" aside={<StatusBadge tone="neutral" size="sm">None</StatusBadge>} />
-          <p className="mt-1.5 text-[11px] leading-[15px] text-muted">No letter has been printed for this company yet.</p>
+          <CardHeader
+            size="sm"
+            title="Print history"
+            aside={
+              letters[0] ? (
+                <StatusBadge tone={runBadge(letters[0]).tone} size="sm">
+                  {runBadge(letters[0]).label}
+                </StatusBadge>
+              ) : (
+                <StatusBadge tone="neutral" size="sm">
+                  None
+                </StatusBadge>
+              )
+            }
+          />
+          {letters.length === 0 ? (
+            <p className="mt-1.5 text-[11px] leading-[15px] text-muted">No letter has been printed for this company yet.</p>
+          ) : (
+            <ul className="mt-1.5 flex flex-col gap-1.5">
+              {letters.slice(0, 3).map((l) => (
+                <li key={l.runId} className="flex flex-col">
+                  <span className="text-[12px] font-medium leading-4 text-ink">
+                    {l.runReference} · {l.template}
+                  </span>
+                  <span className="text-[11px] leading-[15px] text-muted">
+                    Printed {l.printedAt}
+                    {l.confirmedDay ? ` · posted ${l.confirmedDay}` : ""}
+                    {l.status === "cancelled" ? " · run cancelled" : ""}
+                  </span>
+                </li>
+              ))}
+              <li>
+                <Link href={`/new-companies/${number}/letters`} className="text-[11px] font-medium text-brand hover:underline">
+                  View letters
+                </Link>
+              </li>
+            </ul>
+          )}
         </Card>
 
         <Card padding="p-[18px]">
@@ -130,7 +168,17 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
               </Link>
             }
           />
-          <p className="mt-1 text-[11px] leading-[15px] text-muted">Notes are visible to your team only.</p>
+          {note ? (
+            <Link href={`/new-companies/${number}/notes`} className="mt-1.5 flex flex-col gap-1 rounded-lg bg-canvas px-3 py-2.5 hover:bg-mint">
+              <span className="line-clamp-3 whitespace-pre-wrap text-[12px] leading-[17px] text-ink">{note.body}</span>
+              <span className="text-[11px] leading-[15px] text-muted">
+                {note.author} · {note.when}
+                {note.total > 1 ? ` · ${note.total - 1} more` : ""}
+              </span>
+            </Link>
+          ) : (
+            <p className="mt-1 text-[11px] leading-[15px] text-muted">No notes yet. Notes are visible to your team only.</p>
+          )}
         </Card>
       </div>
     </div>
