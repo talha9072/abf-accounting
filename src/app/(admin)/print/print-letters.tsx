@@ -1,111 +1,195 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useState, useTransition } from "react";
 import {
   faBan,
   faCheck,
   faClock,
+  faEnvelopeOpenText,
   faEye,
   faInbox,
   faPrint,
+  faRotateRight,
+  faSpinner,
   faTag,
   faTriangleExclamation,
+  faXmark,
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
 import { FilterDropdown } from "@/components/admin/filter-dropdown";
-import { DataRow, DataTable, Pager } from "@/components/admin/table";
-import { FixAddressModal } from "@/components/admin/company-modals";
-import {
-  ConfirmPrintedModal,
-  LabelsModal,
-  PrintSetupBanner,
-  PrintSteps,
-  ReprintModal,
-} from "@/components/admin/print-parts";
+import { DataRow, DataTable } from "@/components/admin/table";
+import { PrintSetupBanner, PrintSteps, ReprintModal, usePrintFlow, type FlowRun } from "@/components/admin/print-parts";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/controls";
 import { Icon } from "@/components/ui/icon";
 import { useToast } from "@/components/ui/toast";
-import { companies, recentRuns } from "@/lib/mock-data";
+import { removeFromRunAction } from "@/lib/companies/actions";
+import { cancelRunAction } from "@/lib/print/actions";
+import type { QueueRow, RunSummary } from "@/lib/print/queries";
 import { cn } from "@/lib/cn";
 
-const COLUMNS = "28px 32px minmax(220px,562fr) 190px minmax(240px,360fr) 100px 104px 84px";
-const ISSUE_ROW = 8; // Kestrel Trading Ltd — missing postcode
-const ROWS = companies.slice(0, 14);
+const COLUMNS = "28px 40px minmax(220px,520fr) 210px minmax(240px,380fr) 100px 110px 84px";
 
-type ModalKey = "confirm" | "labels" | "fix" | "reprint" | null;
+type Props = {
+  queue: { rows: QueueRow[]; addressIssues: number; incorporatedLabel: string };
+  openRuns: RunSummary[];
+  recentRuns: RunSummary[];
+  templates: Array<{ id: string; name: string; greeting: string }>;
+  templateId: string | null;
+};
 
-export function PrintLetters({ initialModal }: { initialModal: ModalKey }) {
+const toFlow = (r: RunSummary): FlowRun & { printedDay: string } => ({
+  id: r.id,
+  reference: r.reference,
+  letters: r.letters,
+  template: r.template,
+  printedDay: r.printedDay,
+});
+
+export function PrintLetters({ queue, openRuns, recentRuns, templates, templateId }: Props) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const toast = useToast();
-  const [modal, setModal] = useState<ModalKey>(initialModal);
-  const [selected, setSelected] = useState<Set<number>>(() => new Set([0, 1, 2, 3, 4, 5, 6, 7, 9, 10]));
-  const [reprintDate, setReprintDate] = useState(recentRuns[0].date);
+  const flow = usePrintFlow();
+  const [busy, start] = useTransition();
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reprintRun, setReprintRun] = useState<(FlowRun & { printedDay: string }) | null>(null);
 
-  const toggle = (i: number) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
+  const rows = queue.rows;
+  const n = rows.length;
+  const template = templates.find((t) => t.id === templateId) ?? templates[0];
+  const allSel = n > 0 && rows.every((r) => selected.has(r.number));
+  const someSel = !allSel && rows.some((r) => selected.has(r.number));
+  const templateQs = template && template.id !== templates[0]?.id ? `?template=${template.id}` : "";
+
+  const remove = (numbers: string[]) =>
+    start(async () => {
+      const r = await removeFromRunAction(numbers);
+      if (!r.ok) return toast({ message: r.message });
+      setSelected(new Set());
+      router.refresh();
+      toast({ message: `${r.count} removed from the print run` });
     });
+
+  const cancelRun = (run: RunSummary) =>
+    start(async () => {
+      const r = await cancelRunAction(run.id);
+      if (!r.ok) return toast({ message: r.message });
+      router.refresh();
+      toast({ message: `${run.reference} cancelled — ${r.count} companies are back in the print run` });
+    });
+
+  const setTemplate = (id: string) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (id === templates[0]?.id) sp.delete("template");
+    else sp.set("template", id);
+    router.replace(sp.size ? `${pathname}?${sp}` : pathname, { scroll: false });
+  };
+
+  const lastRun = openRuns[0] ?? recentRuns[0];
 
   return (
     <>
       <PageHeader
         title="Print Letters"
-        description="Select new companies, preview the personalised letters and print them on the office printer. Printed companies are marked so nobody gets a second letter."
+        description="Preview the personalised letters for everyone in the print run and print them on the office printer. Printed companies are marked so nobody gets a second letter."
         actions={
           <>
-            <Button variant="secondary" icon={faTag} onClick={() => setModal("labels")}>
+            <Button variant="secondary" icon={faTag} disabled={!lastRun} onClick={() => lastRun && flow.openLabels(toFlow(lastRun))}>
               Print labels (after letters)
             </Button>
-            <ButtonLink href="/print/preview" icon={faPrint}>
-              Print {selected.size} letters
-            </ButtonLink>
+            <Button icon={flow.pending ? faSpinner : faPrint} disabled={n === 0 || flow.pending} onClick={() => flow.printQueue(template?.id ?? null, queue.incorporatedLabel)}>
+              Print {n} {n === 1 ? "letter" : "letters"}
+            </Button>
           </>
         }
       />
 
       <PrintSetupBanner className="-mt-0.5" />
 
+      {/* Runs printed but not confirmed yet */}
+      {openRuns.map((r) => (
+        <div key={r.id} className="flex flex-wrap items-center gap-3 rounded-[10px] border border-warning/30 bg-warning-subtle px-4 py-3 text-[#7c2d12]">
+          <Icon icon={faTriangleExclamation} size={13} />
+          <p className="flex-1 text-[12px] font-medium leading-4">
+            {r.reference} · {r.letters} letters printed {r.printedAt} by {r.printedBy} — not confirmed yet. Confirm once they’re in the post, or
+            cancel to put the companies back in the print run.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" icon={faRotateRight} onClick={() => flow.reprint(toFlow(r))}>
+              Print again
+            </Button>
+            <Button size="sm" variant="secondary" icon={faXmark} disabled={busy} onClick={() => cancelRun(r)}>
+              Cancel run
+            </Button>
+            <Button size="sm" icon={faCheck} onClick={() => flow.openConfirm(toFlow(r))}>
+              Confirm sent
+            </Button>
+          </div>
+        </div>
+      ))}
+
       <section aria-label="Print run summary" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Kpi tone="brand" icon={faInbox} label="Selected for this print run" value={String(selected.size)} sub="incorporated 22 Sep 2026" />
-        <Kpi icon={faClock} label="Template" value="Welcome v3" sub="Dear ##DIRECTOR_FIRSTNAME#" />
-        <Kpi icon={faCheck} iconTone="mint" label="Letters" value={String(selected.size)} sub="one per company" />
-        <Kpi icon={faBan} iconTone="coral" label="Need an address fix" value="1" sub="fix before printing" />
+        <Kpi tone="brand" icon={faInbox} label="Selected for this print run" value={String(n)} sub={queue.incorporatedLabel} />
+        <div className="flex min-h-[120px] flex-col gap-[7px] rounded-[14px] border border-line bg-white p-4">
+          <div className="flex items-center gap-[9px]">
+            <span className="flex size-[30px] items-center justify-center rounded-lg bg-canvas text-ink">
+              <Icon icon={faClock} size={12} />
+            </span>
+            <span className="text-[11px] font-medium leading-[15px] text-muted">Template</span>
+          </div>
+          {templates.length > 1 ? (
+            <FilterDropdown
+              variant="inline"
+              icon={faEnvelopeOpenText}
+              label="Template"
+              value={template?.id}
+              onChange={setTemplate}
+              options={templates.map((t) => ({ value: t.id, label: t.name }))}
+            />
+          ) : (
+            <span className="mt-1 truncate text-[24px] font-bold leading-[30px] text-ink">{template?.name ?? "—"}</span>
+          )}
+          <span className="truncate text-[10px] leading-[13px] text-muted">{template?.greeting}</span>
+        </div>
+        <Kpi icon={faCheck} iconTone="mint" label="Letters" value={String(n)} sub="one per company" />
+        <Link href="/new-companies?view=address-issue&inc=all" className="contents">
+          <Kpi icon={faBan} iconTone="coral" label="Need an address fix" value={String(queue.addressIssues)} sub="fix before printing →" hover />
+        </Link>
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <PrintSteps current={1} />
-        <FilterDropdown
-          className="w-[150px]"
-          variant="inline"
-          icon={faInbox}
-          label="Batch"
-          options={["Since last pull (default)", "Last 7 days", "Last 30 days"]}
-        />
+        <PrintSteps current={2} />
       </div>
 
       {/* Toolbar (52px so the 36px buttons fit inside — Figma buttons overflowed the 48px bar) */}
       <div className="flex min-h-[52px] flex-wrap items-center gap-2.5 rounded-[10px] border border-line bg-white py-2 pl-3 pr-2">
         <Checkbox
           aria-label="Select all"
-          checked={selected.size === ROWS.length - 1}
-          indeterminate={selected.size > 0 && selected.size < ROWS.length - 1}
-          onChange={() =>
-            setSelected((s) => (s.size ? new Set() : new Set(ROWS.map((_, i) => i).filter((i) => i !== ISSUE_ROW))))
-          }
+          checked={allSel}
+          indeterminate={someSel}
+          onChange={() => setSelected(allSel || someSel ? new Set() : new Set(rows.map((r) => r.number)))}
         />
-        <span className="text-[12px] font-bold leading-4 text-ink">{selected.size} selected</span>
-        <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">In this run</span>
-        <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">Address OK</span>
+        <span className="text-[12px] font-bold leading-4 text-ink">{selected.size ? `${selected.size} selected` : `${n} in this run`}</span>
+        {selected.size ? (
+          <Button size="sm" variant="secondary" icon={faXmark} disabled={busy} onClick={() => remove([...selected])}>
+            Remove from run
+          </Button>
+        ) : (
+          <>
+            <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">In this run</span>
+            <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">Address OK</span>
+          </>
+        )}
         <div className="ml-auto flex gap-2">
-          <ButtonLink size="sm" variant="secondary" icon={faEye} href="/print/preview">
+          <ButtonLink size="sm" variant="secondary" icon={faEye} href={`/print/preview${templateQs}`} aria-disabled={n === 0} className={n === 0 ? "pointer-events-none opacity-55" : ""}>
             Preview letters
           </ButtonLink>
-          <Button size="sm" icon={faCheck} onClick={() => setModal("confirm")} disabled={selected.size === 0}>
+          <Button size="sm" icon={flow.pending ? faSpinner : faPrint} disabled={n === 0 || flow.pending} onClick={() => flow.printQueue(template?.id ?? null, queue.incorporatedLabel)}>
             Print &amp; mark printed
           </Button>
         </div>
@@ -113,7 +197,8 @@ export function PrintLetters({ initialModal }: { initialModal: ModalKey }) {
 
       <DataTable
         columns={COLUMNS}
-        bodyClassName="max-h-[448px]"
+        bodyClassName="max-h-[max(360px,calc(100vh-640px))]"
+        className={busy ? "opacity-70" : undefined}
         header={
           <>
             <span>
@@ -125,81 +210,88 @@ export function PrintLetters({ initialModal }: { initialModal: ModalKey }) {
             <span>Address on the letter</span>
             <span>Company no.</span>
             <span>Incorporated</span>
-            <span className="sr-only">Action</span>
+            <span>
+              <span className="sr-only">Action</span>
+            </span>
           </>
         }
-        footer={
-          <>
-            <span className="text-[12px] text-muted">1–50 of 2,298 companies ready to print · {selected.size} selected</span>
-            <Pager perPage={false} pages={46} />
-          </>
-        }
+        footer={<span className="text-[12px] text-muted">{n ? `${n} ${n === 1 ? "company" : "companies"} ready to print` : "The print run is empty"}</span>}
       >
-        {ROWS.map((c, i) => {
-          const issue = i === ISSUE_ROW;
-          const isSel = selected.has(i);
-          return (
-            <DataRow key={c.number} index={i} highlight={issue ? "warning" : undefined}>
-              <Checkbox aria-label={`Select ${c.name}`} checked={isSel} disabled={issue} onChange={() => toggle(i)} />
+        {n === 0 ? (
+          <div className="flex flex-col items-center gap-1.5 px-4 py-12 text-center">
+            <p className="text-[14px] font-bold text-ink">Nothing in the print run yet</p>
+            <p className="text-[12px] text-muted">
+              Pick companies on{" "}
+              <Link href="/new-companies?view=not-reviewed" className="font-medium text-brand underline">
+                New Companies
+              </Link>{" "}
+              and choose “Add to print run”.
+            </p>
+          </div>
+        ) : (
+          rows.map((c, i) => (
+            <DataRow key={c.number} index={i}>
+              <Checkbox
+                aria-label={`Select ${c.name}`}
+                checked={selected.has(c.number)}
+                onChange={() =>
+                  setSelected((s) => {
+                    const next = new Set(s);
+                    if (next.has(c.number)) next.delete(c.number);
+                    else next.add(c.number);
+                    return next;
+                  })
+                }
+              />
               <span className="text-muted tabular-nums">{i + 1}</span>
               <Link href={`/new-companies/${c.number}`} className="truncate font-medium text-ink hover:text-brand hover:underline">
                 {c.name}
               </Link>
-              <span className="truncate text-ink">{c.director}</span>
-              {issue ? (
-                <span className="flex items-center gap-1.5 truncate text-warning">
-                  3 Clarendon Rd, Watford
-                  <Icon icon={faTriangleExclamation} size={10} />
-                  missing postcode
-                </span>
-              ) : (
-                <span className="truncate text-muted">{c.address}</span>
-              )}
+              <span className={cn("truncate", c.noDirector ? "text-warning" : "text-ink")} title={c.director}>
+                {c.director}
+              </span>
+              <span className="truncate text-muted" title={c.address}>
+                {c.address}
+              </span>
               <span className="text-muted tabular-nums">{c.number}</span>
               <span className="text-muted">{c.incorporated}</span>
-              {issue ? (
-                <button type="button" onClick={() => setModal("fix")} className="text-left text-brand hover:underline">
-                  Fix address
-                </button>
-              ) : (
-                <button type="button" onClick={() => toggle(i)} className="text-left text-brand hover:underline">
-                  {isSel ? "Remove" : "Add"}
-                </button>
-              )}
+              <button type="button" disabled={busy} onClick={() => remove([c.number])} className="text-left text-brand hover:underline">
+                Remove
+              </button>
             </DataRow>
-          );
-        })}
+          ))
+        )}
       </DataTable>
 
-      <section aria-label="Recent print runs" className="grid gap-4 md:grid-cols-3">
-        {recentRuns.map((r) => (
-          <button
-            key={r.date}
-            type="button"
-            onClick={() => {
-              setReprintDate(r.date);
-              setModal("reprint");
-            }}
-            className="flex min-h-[104px] flex-col gap-1.5 rounded-[14px] border border-line bg-white p-4 text-left transition-colors hover:border-n400"
-          >
-            <span className="text-[13px] font-bold leading-[18px] text-ink">{r.date}</span>
-            <span className="text-[12px] leading-4 text-ink">{r.letters}</span>
-            <span className="text-[10px] leading-[14px] text-muted">{r.template}</span>
-          </button>
-        ))}
-      </section>
+      {recentRuns.length ? (
+        <section aria-label="Recent print runs" className="grid gap-4 md:grid-cols-3">
+          {recentRuns.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => setReprintRun(toFlow(r))}
+              className="flex min-h-[104px] flex-col gap-1.5 rounded-[14px] border border-line bg-white p-4 text-left transition-colors hover:border-n400"
+            >
+              <span className="text-[13px] font-bold leading-[18px] text-ink">{r.printedDay}</span>
+              <span className="text-[12px] leading-4 text-ink">
+                {r.letters} letters · {r.reference}
+              </span>
+              <span className="text-[10px] leading-[14px] text-muted">
+                {r.template} · by {r.printedBy} · Reprint
+              </span>
+            </button>
+          ))}
+        </section>
+      ) : null}
 
-      <ConfirmPrintedModal
-        open={modal === "confirm"}
-        onClose={() => setModal(null)}
-        onConfirm={() => {
-          setModal("labels");
-          toast({ message: `${selected.size} letters marked as printed`, actionLabel: "Undo" });
-        }}
+      {flow.modals}
+      <ReprintModal
+        key={reprintRun?.id ?? "none"}
+        open={reprintRun !== null}
+        run={reprintRun}
+        onClose={() => setReprintRun(null)}
+        onOpen={(from, to) => reprintRun && flow.reprint(reprintRun, from, to)}
       />
-      <LabelsModal open={modal === "labels"} onClose={() => setModal(null)} />
-      <FixAddressModal open={modal === "fix"} onClose={() => setModal(null)} />
-      <ReprintModal open={modal === "reprint"} onClose={() => setModal(null)} date={reprintDate} />
     </>
   );
 }
@@ -211,6 +303,7 @@ function Kpi({
   sub,
   tone,
   iconTone = "canvas",
+  hover,
 }: {
   icon: IconDefinition;
   label: string;
@@ -218,6 +311,7 @@ function Kpi({
   sub: string;
   tone?: "brand";
   iconTone?: "canvas" | "mint" | "coral";
+  hover?: boolean;
 }) {
   const brand = tone === "brand";
   return (
@@ -225,6 +319,7 @@ function Kpi({
       className={cn(
         "flex min-h-[120px] flex-col gap-[7px] rounded-[14px] p-4",
         brand ? "bg-brand text-white" : "border border-line bg-white",
+        hover && "transition-colors hover:border-n400",
       )}
     >
       <div className="flex items-center gap-[9px]">

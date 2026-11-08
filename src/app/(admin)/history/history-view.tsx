@@ -1,79 +1,101 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import {
-  faCalendarDays,
-  faDownload,
-  faFileArrowDown,
-  faFilter,
-  faMagnifyingGlass,
-  faRotateRight,
-  faTag,
-} from "@fortawesome/free-solid-svg-icons";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { faChevronLeft, faChevronRight, faMagnifyingGlass, faRotateRight, faSpinner, faTag } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
-import { FilterDropdown } from "@/components/admin/filter-dropdown";
-import { DataRow, DataTable, Pager } from "@/components/admin/table";
-import { ReprintModal } from "@/components/admin/print-parts";
-import { StatusBadge } from "@/components/ui/badge";
+import { DataRow, DataTable } from "@/components/admin/table";
+import { LabelsModal, ReprintModal, usePrintFlow, type FlowRun } from "@/components/admin/print-parts";
+import { StatusBadge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/field";
+import { Icon } from "@/components/ui/icon";
 import { Modal } from "@/components/ui/modal";
 import { BoxedTabs } from "@/components/ui/tabs";
-import { companies, excludedHistory, historyCounts, printRunsHistory, sentHistory } from "@/lib/mock-data";
+import { getRunDetailAction } from "@/lib/print/actions";
+import type { historyExcluded, historyNotSent, historySent, RunSummary } from "@/lib/print/queries";
+import { cn } from "@/lib/cn";
 
 export type HistoryTab = "sent" | "excluded" | "not-sent" | "print-runs";
 
-const SENT_COLS = "minmax(220px,466fr) 100px 150px minmax(220px,320fr) 110px 110px 120px 92px";
-const EXCLUDED_COLS = "minmax(220px,1fr) 110px minmax(200px,1fr) 140px 120px 92px";
-const NOT_SENT_COLS = "minmax(220px,1fr) 110px 160px minmax(220px,1fr) 120px 140px";
-const RUN_COLS = "110px 170px 90px minmax(160px,1fr) 140px 120px 100px";
+type Data = {
+  sent: Awaited<ReturnType<typeof historySent>>;
+  excluded: Awaited<ReturnType<typeof historyExcluded>>;
+  notSent: Awaited<ReturnType<typeof historyNotSent>>;
+  runs: RunSummary[];
+};
+type Counts = { sent: number; excluded: number; notSent: number; printRuns: number };
 
-export function HistoryView({ tab }: { tab: HistoryTab }) {
-  const [q, setQ] = useState("");
-  const [runOpen, setRunOpen] = useState(false);
-  const [reprintOpen, setReprintOpen] = useState(false);
+const SENT_COLS = "minmax(220px,466fr) 100px 170px minmax(220px,320fr) 110px 110px 130px 92px";
+const EXCLUDED_COLS = "minmax(220px,1fr) 110px minmax(200px,1fr) 140px 120px";
+const NOT_SENT_COLS = "minmax(220px,1fr) 110px 170px minmax(220px,1fr) 120px 160px";
+const RUN_COLS = "120px 190px 90px minmax(160px,1fr) 150px 120px 130px 100px";
 
-  const sent = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    return t ? sentHistory.filter((r) => r.name.toLowerCase().includes(t) || r.number.includes(t)) : sentHistory;
-  }, [q]);
+const STATE: Record<string, { tone: Tone; label: string }> = {
+  not_reviewed: { tone: "neutral", label: "Not reviewed" },
+  added: { tone: "info", label: "In print run" },
+  address_issue: { tone: "warning", label: "Address issue" },
+  skipped: { tone: "neutral", label: "Skipped" },
+};
+const fmt = (n: number) => n.toLocaleString("en-GB");
+
+export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryTab; q: string; page: number; per: number; counts: Counts; data: Data }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const flow = usePrintFlow();
+  const [query, setQuery] = useState(q);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [reprintRun, setReprintRun] = useState<(FlowRun & { printedDay: string }) | null>(null);
+  const [labelsRun, setLabelsRun] = useState<FlowRun | null>(null);
+
+  const href = (patch: Record<string, string | number | null>) => {
+    const sp = new URLSearchParams(searchParams.toString());
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === "" || (k === "page" && v === 1) || (k === "tab" && v === "sent")) sp.delete(k);
+      else sp.set(k, String(v));
+    }
+    return sp.size ? `${pathname}?${sp}` : pathname;
+  };
+
+  useEffect(() => {
+    if (query.trim() === q) return;
+    const t = setTimeout(() => router.replace(href({ q: query.trim() || null, page: null }), { scroll: false }), 350);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  const rowsShown =
+    tab === "sent" ? data.sent.length : tab === "excluded" ? data.excluded.length : tab === "not-sent" ? data.notSent.length : data.runs.length;
+  const totalForTab = tab === "sent" ? counts.sent : tab === "excluded" ? counts.excluded : tab === "not-sent" ? counts.notSent : counts.printRuns;
+  const footer = (label: string) => (
+    <>
+      <span className="text-[12px] text-muted">
+        {rowsShown ? `${fmt((page - 1) * per + 1)}–${fmt((page - 1) * per + rowsShown)} ${q ? `matching “${q}”` : `of ${fmt(totalForTab)}`} ${label}` : `No ${label}`}
+      </span>
+      <nav aria-label="Pagination" className="ml-auto flex items-center gap-1 text-[12px] font-medium">
+        <PageLink disabled={page <= 1} href={href({ page: page - 1 })} label="Previous page" icon={faChevronLeft} />
+        <span className="px-2 text-ink">Page {page}</span>
+        <PageLink disabled={rowsShown < per} href={href({ page: page + 1 })} label="Next page" icon={faChevronRight} />
+      </nav>
+    </>
+  );
 
   return (
     <>
-      <PageHeader
-        title="History"
-        description="Every company you’ve sent a letter to, excluded, or not sent to yet."
-        actions={
-          <Button variant="secondary" icon={faFileArrowDown}>
-            Export CSV
-          </Button>
-        }
-      />
+      <PageHeader title="History" description="Every company you’ve sent a letter to, excluded, or not sent to yet." />
 
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
           icon={faMagnifyingGlass}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
+          value={query}
+          maxLength={100}
+          onChange={(e) => setQuery(e.target.value)}
           placeholder="Search company name or number"
           aria-label="Search company name or number"
           className="h-10 w-full max-w-[360px]"
           inputClassName="text-[13px]"
-        />
-        <FilterDropdown
-          variant="inline"
-          className="w-[118px]"
-          icon={faFilter}
-          label="Town"
-          options={["All towns", "Manchester", "Birmingham", "Leeds", "Bristol", "Luton"]}
-        />
-        <FilterDropdown
-          variant="inline"
-          className="w-[138px]"
-          icon={faCalendarDays}
-          label="Date range"
-          options={["Last 30 days", "Last 7 days", "Last 12 months", "Custom range…"]}
         />
         <span className="ml-auto text-[12px] leading-4 text-muted">Kept for 12 months</span>
       </div>
@@ -81,10 +103,10 @@ export function HistoryView({ tab }: { tab: HistoryTab }) {
       <BoxedTabs
         className="self-start"
         items={[
-          { label: "Sent", count: historyCounts.sent, href: "/history", active: tab === "sent" },
-          { label: "Excluded", count: historyCounts.excluded, href: "/history?tab=excluded", active: tab === "excluded" },
-          { label: "Not sent", count: historyCounts.notSent, href: "/history?tab=not-sent", active: tab === "not-sent" },
-          { label: "Print runs", count: historyCounts.printRuns, href: "/history?tab=print-runs", active: tab === "print-runs" },
+          { label: "Sent", count: fmt(counts.sent), href: href({ tab: "sent", page: null }), active: tab === "sent" },
+          { label: "Excluded", count: fmt(counts.excluded), href: href({ tab: "excluded", page: null }), active: tab === "excluded" },
+          { label: "Not sent", count: fmt(counts.notSent), href: href({ tab: "not-sent", page: null }), active: tab === "not-sent" },
+          { label: "Print runs", count: fmt(counts.printRuns), href: href({ tab: "print-runs", page: null }), active: tab === "print-runs" },
         ]}
       />
 
@@ -101,32 +123,40 @@ export function HistoryView({ tab }: { tab: HistoryTab }) {
               <span>Sent on</span>
               <span>Print run</span>
               <span>Printed by</span>
-              <span className="sr-only">Action</span>
+              <span>
+                <span className="sr-only">Action</span>
+              </span>
             </>
           }
-          footer={
-            <>
-              <span className="text-[12px] text-muted">1–{sent.length} of {q ? sent.length : historyCounts.sent} letters sent</span>
-              <Pager perPage={false} pages={29} />
-            </>
-          }
+          footer={footer("letters sent")}
         >
-          {sent.map((r, i) => (
-            <DataRow key={r.number} index={i}>
-              <span className="truncate font-medium text-ink">{r.name}</span>
-              <span className="text-muted tabular-nums">{r.number}</span>
-              <span className="truncate text-ink">{r.director}</span>
-              <span className="truncate text-muted">{r.address}</span>
-              <span className="text-muted">{r.sentOn}</span>
-              <button type="button" onClick={() => setRunOpen(true)} className="text-left text-muted hover:text-ink hover:underline">
-                {r.printRun}
-              </button>
-              <span className="truncate text-muted">{r.printedBy}</span>
-              <Link href="/print/preview" className="text-brand hover:underline">
-                View letter
-              </Link>
-            </DataRow>
-          ))}
+          {data.sent.length === 0 ? (
+            <Empty text={q ? "Nothing matches that search." : "No letters printed yet. They appear here after a print run."} />
+          ) : (
+            data.sent.map((r, i) => (
+              <DataRow key={`${r.number}-${r.runId}`} index={i}>
+                <Link href={`/new-companies/${r.number}`} className="truncate font-medium text-ink hover:text-brand hover:underline">
+                  {r.name}
+                </Link>
+                <span className="text-muted tabular-nums">{r.number}</span>
+                <span className="truncate text-ink">{r.director}</span>
+                <span className="truncate text-muted" title={r.address}>
+                  {r.address}
+                </span>
+                <span className="text-muted">
+                  {r.sentOn}
+                  {r.confirmed ? null : <span className="ml-1 text-[10px] text-warning">(unconfirmed)</span>}
+                </span>
+                <button type="button" onClick={() => setRunId(r.runId)} className="text-left text-muted hover:text-ink hover:underline">
+                  {r.printRun}
+                </button>
+                <span className="truncate text-muted">{r.printedBy}</span>
+                <a href={`/print-doc/${r.runId}/letters`} target="_blank" rel="noopener" className="text-brand hover:underline">
+                  View letter
+                </a>
+              </DataRow>
+            ))
+          )}
         </DataTable>
       ) : null}
 
@@ -140,23 +170,29 @@ export function HistoryView({ tab }: { tab: HistoryTab }) {
               <span>Reason</span>
               <span>Excluded by</span>
               <span>Date</span>
-              <span className="sr-only">Action</span>
             </>
           }
-          footer={<span className="text-[12px] text-muted">1–{excludedHistory.length} of {historyCounts.excluded} excluded</span>}
+          footer={footer("excluded")}
         >
-          {excludedHistory.map((r, i) => (
-            <DataRow key={r.number} index={i}>
-              <span className="truncate font-medium text-ink">{r.name}</span>
-              <span className="text-muted tabular-nums">{r.number}</span>
-              <span className="truncate text-ink">{r.reason}</span>
-              <span className="text-muted">{r.by}</span>
-              <span className="text-muted">{r.date}</span>
-              <button type="button" className="text-left text-brand hover:underline">
-                Remove
-              </button>
-            </DataRow>
-          ))}
+          {data.excluded.length === 0 ? (
+            <Empty text="Nobody is on the do-not-contact list." />
+          ) : (
+            data.excluded.map((r, i) => (
+              <DataRow key={`${r.number}-${i}`} index={i}>
+                {r.number ? (
+                  <Link href={`/new-companies/${r.number}`} className="truncate font-medium text-ink hover:text-brand hover:underline">
+                    {r.name}
+                  </Link>
+                ) : (
+                  <span className="truncate font-medium text-ink">{r.name}</span>
+                )}
+                <span className="text-muted tabular-nums">{r.number || "—"}</span>
+                <span className="truncate text-ink">{r.reason}</span>
+                <span className="text-muted">{r.by}</span>
+                <span className="text-muted">{r.date}</span>
+              </DataRow>
+            ))
+          )}
         </DataTable>
       ) : null}
 
@@ -169,34 +205,33 @@ export function HistoryView({ tab }: { tab: HistoryTab }) {
               <span>Company</span>
               <span>Company no.</span>
               <span>Director</span>
-              <span>Registered address</span>
+              <span>Address</span>
               <span>Incorporated</span>
               <span>Status</span>
             </>
           }
-          footer={
-            <>
-              <span className="text-[12px] text-muted">1–50 of {historyCounts.notSent} not sent</span>
-              <Pager perPage={false} pages={923} />
-            </>
-          }
+          footer={footer("not sent")}
         >
-          {companies.slice(10).map((c, i) => (
-            <DataRow key={c.number} index={i}>
-              <Link href={`/new-companies/${c.number}`} className="truncate font-medium text-ink hover:text-brand hover:underline">
-                {c.name}
-              </Link>
-              <span className="text-muted tabular-nums">{c.number}</span>
-              <span className="truncate text-ink">{c.director}</span>
-              <span className="truncate text-muted">{c.address}</span>
-              <span className="text-muted">{c.incorporated}</span>
-              <span>
-                <StatusBadge tone="neutral" size="sm">
-                  Not reviewed
-                </StatusBadge>
-              </span>
-            </DataRow>
-          ))}
+          {data.notSent.length === 0 ? (
+            <Empty text="Every company has had a letter or was excluded." />
+          ) : (
+            data.notSent.map((c, i) => (
+              <DataRow key={c.number} index={i}>
+                <Link href={`/new-companies/${c.number}`} className="truncate font-medium text-ink hover:text-brand hover:underline">
+                  {c.name}
+                </Link>
+                <span className="text-muted tabular-nums">{c.number}</span>
+                <span className="truncate text-ink">{c.director}</span>
+                <span className="truncate text-muted">{c.address}</span>
+                <span className="text-muted">{c.incorporated}</span>
+                <span>
+                  <StatusBadge tone={STATE[c.state]?.tone ?? "neutral"} size="sm">
+                    {STATE[c.state]?.label ?? c.state}
+                  </StatusBadge>
+                </span>
+              </DataRow>
+            ))
+          )}
         </DataTable>
       ) : null}
 
@@ -210,90 +245,158 @@ export function HistoryView({ tab }: { tab: HistoryTab }) {
               <span>Letters</span>
               <span>Template</span>
               <span>Printed by</span>
+              <span>Status</span>
               <span>Labels</span>
-              <span className="sr-only">Action</span>
+              <span>
+                <span className="sr-only">Action</span>
+              </span>
             </>
           }
-          footer={<span className="text-[12px] text-muted">1–{printRunsHistory.length} of {historyCounts.printRuns} print runs</span>}
+          footer={footer("print runs")}
         >
-          {printRunsHistory.map((r, i) => (
-            <DataRow key={r.ref} index={i}>
-              <span className="font-medium text-ink">{r.ref}</span>
-              <span className="text-muted">{r.date}</span>
-              <span className="text-ink tabular-nums">{r.letters}</span>
-              <span className="truncate text-ink">{r.template}</span>
-              <span className="text-muted">{r.by}</span>
-              <span>
-                <StatusBadge tone={r.labels === "Printed" ? "success" : "warning"} size="sm">
-                  {r.labels}
-                </StatusBadge>
-              </span>
-              <button type="button" onClick={() => setRunOpen(true)} className="text-left text-brand hover:underline">
-                View run
-              </button>
-            </DataRow>
-          ))}
+          {data.runs.length === 0 ? (
+            <Empty text="No print runs yet." />
+          ) : (
+            data.runs.map((r, i) => (
+              <DataRow key={r.id} index={i}>
+                <span className="font-medium text-ink">{r.reference}</span>
+                <span className="text-muted">{r.printedAt}</span>
+                <span className="text-ink tabular-nums">{r.letters}</span>
+                <span className="truncate text-ink">{r.template}</span>
+                <span className="truncate text-muted">{r.printedBy}</span>
+                <span>
+                  <StatusBadge tone={r.status === "confirmed" ? "success" : "warning"} size="sm">
+                    {r.status === "confirmed" ? "Sent" : "Not confirmed"}
+                  </StatusBadge>
+                </span>
+                <span>
+                  <StatusBadge tone={r.labelsPrinted ? "success" : "neutral"} size="sm">
+                    {r.labelsPrinted ? "Printed" : "Not printed"}
+                  </StatusBadge>
+                </span>
+                <button type="button" onClick={() => setRunId(r.id)} className="text-left text-brand hover:underline">
+                  View run
+                </button>
+              </DataRow>
+            ))
+          )}
         </DataTable>
       ) : null}
 
       <PrintRunModal
-        open={runOpen}
-        onClose={() => setRunOpen(false)}
-        onReprint={() => {
-          setRunOpen(false);
-          setReprintOpen(true);
-        }}
+        runId={runId}
+        onClose={() => setRunId(null)}
+        onReprint={(r) => (setRunId(null), setReprintRun(r))}
+        onLabels={(r) => (setRunId(null), setLabelsRun(r))}
       />
-      <ReprintModal open={reprintOpen} onClose={() => setReprintOpen(false)} date="23 Oct 2026" />
+      <ReprintModal
+        key={reprintRun?.id ?? "none"}
+        open={reprintRun !== null}
+        run={reprintRun}
+        onClose={() => setReprintRun(null)}
+        onOpen={(from, to) => reprintRun && flow.reprint(reprintRun, from, to)}
+      />
+      <LabelsModal open={labelsRun !== null} run={labelsRun} onClose={() => setLabelsRun(null)} />
     </>
   );
 }
 
-const RUN_ITEMS = [
-  ["Northfield Studio Labs Ltd", "Sarah Ahmed · Manchester"],
-  ["Brightwell Systems Ltd", "James Okafor · Leeds"],
-  ["Harbour & Pine Retail Ltd", "Mei Chen · Bristol"],
-  ["Vela Operations Ltd", "Tom Price · Cardiff"],
-  ["Oakline Advisory Services Ltd", "Aisha Khan · Birmingham"],
-];
+function Empty({ text }: { text: string }) {
+  return <p className="px-4 py-10 text-center text-[13px] text-muted">{text}</p>;
+}
 
-function PrintRunModal({ open, onClose, onReprint }: { open: boolean; onClose: () => void; onReprint: () => void }) {
+function PageLink({ disabled, href, label, icon }: { disabled: boolean; href: string; label: string; icon: typeof faChevronLeft }) {
+  const cls = "inline-flex size-7 items-center justify-center rounded-md";
+  return disabled ? (
+    <span className={cn(cls, "opacity-40")}>
+      <Icon icon={icon} size={9} />
+    </span>
+  ) : (
+    <Link href={href} scroll={false} aria-label={label} className={cn(cls, "hover:bg-canvas")}>
+      <Icon icon={icon} size={9} />
+    </Link>
+  );
+}
+
+type RunDetail = NonNullable<Awaited<ReturnType<typeof getRunDetailAction>>>;
+
+function PrintRunModal({
+  runId,
+  onClose,
+  onReprint,
+  onLabels,
+}: {
+  runId: string | null;
+  onClose: () => void;
+  onReprint: (r: FlowRun & { printedDay: string }) => void;
+  onLabels: (r: FlowRun) => void;
+}) {
+  const [loaded, setLoaded] = useState<RunDetail | null>(null);
+  const [, start] = useTransition();
+  const run = loaded && loaded.id === runId ? loaded : null;
+
+  useEffect(() => {
+    if (!runId) return;
+    let alive = true;
+    start(async () => {
+      const d = await getRunDetailAction(runId);
+      if (alive && d) setLoaded(d);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
+
+  const flowRun = run ? { id: run.id, reference: run.reference, letters: run.letters, template: run.template, printedDay: run.printedDay } : null;
+
   return (
     <Modal
-      open={open}
+      open={runId !== null}
       onClose={onClose}
       width={620}
-      title="Print run · Today 09:12"
-      subtitle="10 letters · Welcome Letter v3 · printed by Abi Brown"
+      title={run ? `Print run · ${run.reference}` : "Print run"}
+      subtitle={run ? `${run.letters} letters · ${run.template} · printed ${run.printedAt} by ${run.printedBy}` : "Loading…"}
       footer={
-        <>
-          <Button variant="secondary" icon={faDownload}>
-            Download PDF
-          </Button>
-          <div className="ml-auto flex flex-wrap gap-3">
-            <Button variant="secondary" icon={faTag}>
-              Reprint labels
-            </Button>
-            <Button variant="secondary" icon={faRotateRight} onClick={onReprint}>
-              Reprint
-            </Button>
-            <Button onClick={onClose}>Close</Button>
-          </div>
-        </>
+        run && flowRun ? (
+          <>
+            <a href={`/print-doc/${run.id}/letters`} target="_blank" rel="noopener" className="text-[13px] font-medium text-brand hover:underline">
+              Open letters (PDF via print)
+            </a>
+            <div className="ml-auto flex flex-wrap gap-3">
+              <Button variant="secondary" icon={faTag} onClick={() => onLabels(flowRun)}>
+                Reprint labels
+              </Button>
+              <Button variant="secondary" icon={faRotateRight} onClick={() => onReprint(flowRun)}>
+                Reprint
+              </Button>
+              <Button onClick={onClose}>Close</Button>
+            </div>
+          </>
+        ) : null
       }
     >
-      <ul className="overflow-hidden rounded-[10px] border border-line">
-        {RUN_ITEMS.map(([name, sub]) => (
-          <li key={name} className="flex items-center justify-between gap-3 border-b border-line px-3.5 py-3">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[13px] font-medium leading-[18px] text-ink">{name}</span>
-              <span className="text-[11px] leading-[15px] text-muted">{sub}</span>
-            </div>
-            <StatusBadge tone="success">Posted</StatusBadge>
-          </li>
-        ))}
-        <li className="px-3.5 py-3 text-[12px] text-muted">…and 5 more</li>
-      </ul>
+      {!run ? (
+        <p className="flex items-center gap-2 text-[13px] text-muted">
+          <Icon icon={faSpinner} size={12} spin /> Loading run…
+        </p>
+      ) : (
+        <ul className="max-h-[360px] overflow-y-auto rounded-[10px] border border-line scroll-area">
+          {run.items.map((it) => (
+            <li key={it.number} className="flex items-center justify-between gap-3 border-b border-line px-3.5 py-3 last:border-b-0">
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <span className="truncate text-[13px] font-medium leading-[18px] text-ink">{it.name}</span>
+                <span className="truncate text-[11px] leading-[15px] text-muted">
+                  {it.director}
+                  {it.town ? ` · ${it.town}` : ""}
+                </span>
+              </div>
+              <StatusBadge tone={it.state === "posted" ? "success" : it.state === "printed" ? "warning" : "neutral"}>
+                {it.state === "posted" ? "Posted" : it.state === "printed" ? "Printed" : "Changed"}
+              </StatusBadge>
+            </li>
+          ))}
+        </ul>
+      )}
     </Modal>
   );
 }

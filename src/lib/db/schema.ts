@@ -238,6 +238,8 @@ export const letterTemplates = pgTable("letter_templates", {
   signOff: varchar("sign_off", { length: 200 }).notNull().default("Kind regards,"),
   defaultOffer: varchar("default_offer", { length: 200 }),
   callToAction: varchar("call_to_action", { length: 200 }),
+  /** Name printed under the sign-off, e.g. "Lekan". */
+  signatoryName: varchar("signatory_name", { length: 120 }),
   currentVersionId: uuid("current_version_id"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -260,18 +262,45 @@ export const templateVersions = pgTable(
   (t) => [index("template_versions_template_idx").on(t.templateId)],
 );
 
-export const printRuns = pgTable("print_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  reference: varchar("reference", { length: 16 }).notNull(), // PR-2310
-  templateVersionId: uuid("template_version_id").references(() => templateVersions.id, { onDelete: "set null" }),
-  status: varchar("status", { length: 16 }).notNull().default("draft"), // draft | printed | confirmed
-  letterCount: integer("letter_count").notNull().default(0),
-  printedBy: uuid("printed_by").references(() => users.id, { onDelete: "set null" }),
-  printedAt: timestamp("printed_at", { withTimezone: true }),
-  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
-  labelsPrintedAt: timestamp("labels_printed_at", { withTimezone: true }),
-  createdAt: createdAt(),
-});
+export const printRuns = pgTable(
+  "print_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    reference: varchar("reference", { length: 16 }).notNull(), // PR-0811-01
+    templateVersionId: uuid("template_version_id").references(() => templateVersions.id, { onDelete: "set null" }),
+    /** "Welcome Letter v3" — kept even if the template is renamed later. */
+    templateName: varchar("template_name", { length: 120 }),
+    /** printed → confirmed (letters marked sent) · or cancelled */
+    status: varchar("status", { length: 16 }).notNull().default("printed"),
+    letterCount: integer("letter_count").notNull().default(0),
+    printedBy: uuid("printed_by").references(() => users.id, { onDelete: "set null" }),
+    printedAt: timestamp("printed_at", { withTimezone: true }),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    labelsPrintedAt: timestamp("labels_printed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("print_runs_reference_unique").on(t.reference), index("print_runs_status_idx").on(t.status)],
+);
+
+/** Everything printed on one letter, frozen at print time so a reprint is identical. */
+export type LetterSnapshot = {
+  companyName: string;
+  companyNumber: string;
+  directorFullName: string | null;
+  directorFirstName: string | null;
+  addressLines: string[];
+  incorporatedOn: string;
+  letterDate: string; // YYYY-MM-DD
+  /** Merged + sanitised body HTML. */
+  bodyHtml: string;
+  greeting: string;
+  signOff: string;
+  signatory: string | null;
+  offer: string | null;
+  cta: string | null;
+  qrUrl: string | null;
+};
 
 export const printRunItems = pgTable(
   "print_run_items",
@@ -285,8 +314,9 @@ export const printRunItems = pgTable(
     position: integer("position").notNull(),
     reference: varchar("reference", { length: 32 }).notNull(), // ABF-17840124
     addressSnapshot: jsonb("address_snapshot").$type<Address>().notNull(),
+    letter: jsonb("letter").$type<LetterSnapshot>(),
   },
-  (t) => [primaryKey({ columns: [t.printRunId, t.companyId] })],
+  (t) => [primaryKey({ columns: [t.printRunId, t.companyId] }), index("print_run_items_company_idx").on(t.companyId)],
 );
 
 /* ================================================================== */

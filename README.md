@@ -87,6 +87,17 @@ Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s)
 
 `npm run pull -- --now` forces a manual pull from the terminal. `npx tsx scripts/test-eligibility.ts` checks the rules.
 
+## Printing letters
+
+1. On **New Companies**, pick companies and **Add to print run**.
+2. On **Print**, choose the template and **Preview** (every letter is merged from the template + Companies House data).
+3. **Print N letters** creates a print run (`PR-ddmm-nn`), freezes each merged letter in `print_run_items.letter`, marks the companies *Printed* and opens `/print-doc/{run}/letters` — A4, one letter per page, browser print dialog (choose “Save as PDF” for a PDF).
+4. **Did all letters print?** → *Yes* marks them *Sent* (with Undo); *Not yet* reprints. A run that is never confirmed stays as a banner on Print with **Confirm sent / Print again / Cancel run** (cancel puts the companies back in the print run).
+5. **Print labels** opens `/print-doc/{run}/labels` — A4, 2 × 6 labels of 98 × 46 mm, same order as the letters, with “start at label” for part-used sheets and a test sheet.
+6. **History → Print runs** shows every run; reprint all or a range (paper jam) without changing any dates.
+
+Template HTML is reduced to an allow-list of formatting tags and every merged value is HTML-escaped (`src/lib/letters`). Checks: `npx tsx scripts/test-letters.ts`.
+
 ## Going live — database
 
 All schema changes are plain SQL files in **`/drizzle`** (`0000_init.sql`, …). They are the source of truth for the live database.
