@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   faBan,
   faBell,
@@ -19,7 +19,7 @@ import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/button";
 import { MenuItem, Popover } from "@/components/ui/popover";
 import { signOutAction } from "@/lib/auth/actions";
-import { companies, excludedHistory, notificationsList } from "@/lib/mock-data";
+import { notificationsList } from "@/lib/mock-data";
 import { cn } from "@/lib/cn";
 
 export type TopbarUser = { name: string; email: string; initials: string };
@@ -76,12 +76,26 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return { companies: companies.slice(0, 4), optOuts: [] as typeof excludedHistory };
-    return {
-      companies: companies.filter((c) => c.name.toLowerCase().includes(term) || c.number.includes(term)).slice(0, 6),
-      optOuts: excludedHistory.filter((c) => c.name.toLowerCase().includes(term) || c.number.includes(term)).slice(0, 3),
+  type Hit = { number: string; name: string; meta: string };
+  const [results, setResults] = useState<{ companies: Hit[]; optOuts: Hit[] }>({ companies: [], optOuts: [] });
+  const [loading, setLoading] = useState(true);
+
+  // Debounced server search (name or company number).
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/companies/search?q=${encodeURIComponent(q.trim())}`, { signal: ctrl.signal, cache: "no-store" });
+        if (res.ok) setResults(await res.json());
+      } catch {
+        /* aborted / offline */
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false);
+      }
+    }, q ? 200 : 0);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
     };
   }, [q]);
 
@@ -138,7 +152,9 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
       <div className="max-h-[420px] overflow-y-auto scroll-area">
         <p className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted">Companies</p>
         {results.companies.length === 0 ? (
-          <p className="px-3 py-3 text-[13px] text-muted">No companies match “{q}”.</p>
+          <p className="px-3 py-3 text-[13px] text-muted">
+            {loading ? "Searching…" : q ? `No companies match “${q}”.` : "No companies imported yet."}
+          </p>
         ) : (
           results.companies.map((c, i) => (
             <button
@@ -156,9 +172,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
               </span>
               <span className="flex flex-1 flex-col gap-0.5">
                 <span className="text-[13px] font-medium leading-[18px] text-ink">{c.name}</span>
-                <span className="text-[11px] leading-[15px] text-muted">
-                  {c.number} · {c.state === "added" ? "In today’s run" : "Ready"}
-                </span>
+                <span className="text-[11px] leading-[15px] text-muted">{c.meta}</span>
               </span>
               {i === index ? <span className="text-[11px] text-muted">↵</span> : null}
             </button>
@@ -168,15 +182,20 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
           <>
             <p className="px-3 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-muted">Opt-outs</p>
             {results.optOuts.map((c) => (
-              <div key={c.number} className="flex items-start gap-3 rounded-lg px-3 py-2.5">
+              <button
+                key={`${c.number}-${c.meta}`}
+                type="button"
+                onClick={() => c.number && open(c.number)}
+                className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-canvas"
+              >
                 <span className="mt-0.5 text-muted">
                   <Icon icon={faBan} size={12} />
                 </span>
                 <span className="flex flex-col gap-0.5">
                   <span className="text-[13px] font-medium leading-[18px] text-ink">{c.name}</span>
-                  <span className="text-[11px] leading-[15px] text-muted">Excluded {c.date}</span>
+                  <span className="text-[11px] leading-[15px] text-muted">{c.meta}</span>
                 </span>
-              </div>
+              </button>
             ))}
           </>
         ) : null}

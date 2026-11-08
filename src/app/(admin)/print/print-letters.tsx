@@ -198,7 +198,7 @@ export function PrintLetters({ initialModal }: { initialModal: ModalKey }) {
         }}
       />
       <LabelsModal open={modal === "labels"} onClose={() => setModal(null)} />
-      <FixAddressModal open={modal === "fix"} onClose={() => setModal(null)} company="Kestrel Trading Ltd" number="17840420" />
+      <FixAddressModal open={modal === "fix"} onClose={() => setModal(null)} />
       <ReprintModal open={modal === "reprint"} onClose={() => setModal(null)} date={reprintDate} />
     </>
   );

@@ -14,17 +14,19 @@ import { usePull } from "@/components/admin/pull-center";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
 
-type NavItem = { href: string; label: string; icon: IconDefinition; count?: string };
+type NavItem = { href: string; label: string; icon: IconDefinition; count?: string; title?: string };
 
-const NAV: NavItem[] = [
-  { href: "/new-companies", label: "New Companies", icon: faBuilding, count: "2,346" },
-  { href: "/print", label: "Print", icon: faPrint, count: "10" },
-  { href: "/letter-templates", label: "Letter Templates", icon: faEnvelopeOpenText },
-  { href: "/history", label: "History", icon: faClockRotateLeft },
-];
+export type SidebarCounts = { toReview: number; inRun: number };
 
-export function Sidebar() {
+export function Sidebar({ counts }: { counts: SidebarCounts }) {
   const pathname = usePathname();
+  const fmt = (n: number) => n.toLocaleString("en-GB");
+  const NAV: NavItem[] = [
+    { href: "/new-companies", label: "New Companies", icon: faBuilding, count: counts.toReview ? fmt(counts.toReview) : undefined, title: "Ready, not reviewed yet" },
+    { href: "/print", label: "Print", icon: faPrint, count: counts.inRun ? fmt(counts.inRun) : undefined, title: "In today’s print run" },
+    { href: "/letter-templates", label: "Letter Templates", icon: faEnvelopeOpenText },
+    { href: "/history", label: "History", icon: faClockRotateLeft },
+  ];
 
   return (
     <aside className="sticky top-0 flex h-screen w-[272px] shrink-0 flex-col gap-[18px] bg-[linear-gradient(180deg,#0d333f_0%,#09242d_60%,#09242d_100%)] px-6 pb-6 pt-[26px] text-white">
@@ -53,6 +55,7 @@ export function Sidebar() {
               <span className="flex-1 truncate">{item.label}</span>
               {item.count ? (
                 <span
+                  title={item.title}
                   className={cn(
                     "rounded-full px-2 py-0.5 text-[11px] font-bold leading-[15px]",
                     active ? "bg-white/70 text-ink" : "bg-white/12 text-white/90",

@@ -1,44 +1,42 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { faBan, faCheck, faCircleCheck, faPen, faPlus } from "@fortawesome/free-solid-svg-icons";
+import { faBan, faCheck, faCircleCheck, faPen, faTriangleExclamation, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { StatusBadge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
-import { findCompany } from "@/lib/mock-data";
+import { formatAddress, formatDate, sicLabel } from "@/lib/companies/format";
+import { getCompanyActivity } from "@/lib/companies/queries";
+import { formatSaTime } from "@/lib/pull/dates";
+import { cn } from "@/lib/cn";
+import { ExcludeCard } from "./company-actions";
+import { loadCompany, STATE_BADGE } from "./data";
 import { ActivityTimeline } from "./parts";
-import { ExcludeButton } from "./exclude-button";
 
 export async function generateMetadata({ params }: PageProps<"/new-companies/[number]">): Promise<Metadata> {
   const { number } = await params;
-  return { title: findCompany(number)?.name ?? "Company" };
+  return { title: (await loadCompany(number))?.name ?? "Company" };
 }
-
-const CHECKS = [
-  "Company type is Ltd",
-  "Address is complete",
-  "Not at your own office address",
-  "Not a shared or agent address",
-  "Not a Companies House default address",
-  "Not excluded",
-  "Not printed before",
-];
 
 export default async function CompanyOverviewPage({ params }: PageProps<"/new-companies/[number]">) {
   const { number } = await params;
-  const company = findCompany(number)!;
+  const c = (await loadCompany(number))!;
+  const activity = await getCompanyActivity(c);
+  const badge = STATE_BADGE[c.state];
 
   const left: Array<[string, string, string?]> = [
-    ["Company status", "Active"],
-    ["Company type", "Private limited company"],
-    ["Date of creation", "22 Sep 2026"],
-    ["Registered office", company.address],
+    ["Company status", c.status.replace(/^\w/, (s) => s.toUpperCase())],
+    ["Company type", c.typeLabel],
+    ["Date of creation", c.incorporated],
+    ["Registered office", c.registeredAddress || "No address on record"],
   ];
   const right: Array<[string, string, string?]> = [
-    ["SIC codes", "62012 · Business and domestic software development", "Primary activity"],
-    ["Accounts", "First accounts not yet filed", "Accounts data sourced from company profile"],
-    ["Confirmation statement", "First statement not yet due", "Status shown from Companies House profile"],
-    ["Import source", "Advanced company search", "Imported 22 Sep 2026 at 06:00"],
+    ["SIC codes", c.sicCodes.length ? sicLabel(c.sicCodes[0]) : "None given", c.sicCodes.length > 1 ? `+ ${c.sicCodes.slice(1).join(", ")}` : "Primary activity"],
+    ["Director (letter goes to)", c.directorFullName ?? (c.officersFetched ? "No active director listed" : "Not fetched yet"), c.directorFirstName ? `Letter opens “Dear ${c.directorFirstName},”` : "Letter opens “To whom it may concern,”"],
+    ["Posting address", formatAddress(c.posting) || "—", c.postingAddress ? "Fixed by your team" : "Same as registered office"],
+    ["Import source", "Advanced company search", `Imported ${formatDate(c.importedAt.toISOString())} at ${formatSaTime(c.importedAt)}`],
   ];
+
+  const passedAll = c.passedCount === c.checks.length;
 
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[1028fr_532fr]">
@@ -48,7 +46,7 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
             title="Companies House information"
             aside={
               <span className="inline-flex h-[27px] items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">
-                From Companies House · 06:00
+                From Companies House · {formatSaTime(c.importedAt)}
               </span>
             }
           />
@@ -66,25 +64,41 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
             ))}
           </dl>
         </Card>
-        <ActivityTimeline />
+        <ActivityTimeline items={activity} limit={5} />
       </div>
 
       <div className="flex flex-col gap-4">
         <Card>
-          <CardHeader title="Why it gets a letter" aside={<StatusBadge tone="info">Added</StatusBadge>} />
+          <CardHeader title="Why it gets a letter" aside={<StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>} />
           <ul className="mt-3 flex flex-col gap-2.5">
-            {CHECKS.map((c) => (
-              <li key={c} className="flex items-center gap-2.5 text-[13px] leading-[18px] text-ink">
-                <span className="flex size-[18px] items-center justify-center rounded-full bg-mint text-brand">
-                  <Icon icon={faCheck} size={9} />
+            {c.checks.map((x) => (
+              <li key={x.key} className={cn("flex items-center gap-2.5 text-[13px] leading-[18px]", x.passed ? "text-ink" : "font-medium text-danger")}>
+                <span
+                  className={cn(
+                    "flex size-[18px] items-center justify-center rounded-full",
+                    x.passed ? "bg-mint text-brand" : "bg-danger-subtle text-danger",
+                  )}
+                >
+                  <Icon icon={x.passed ? faCheck : faXmark} size={9} />
                 </span>
-                {c}
+                {x.label}
               </li>
             ))}
           </ul>
-          <p className="mt-3 flex items-center gap-2 rounded-[10px] bg-mint px-3 py-2.5 text-[12px] font-medium leading-4 text-brand">
-            <Icon icon={faCircleCheck} size={12} />
-            Passed 7 of 7 — included in today’s print run
+          <p
+            className={cn(
+              "mt-3 flex items-center gap-2 rounded-[10px] px-3 py-2.5 text-[12px] font-medium leading-4",
+              passedAll && c.state !== "excluded" ? "bg-mint text-brand" : "bg-danger-subtle text-danger",
+            )}
+          >
+            <Icon icon={passedAll && c.state !== "excluded" ? faCircleCheck : faTriangleExclamation} size={12} />
+            {c.state === "excluded"
+              ? "Excluded — it won’t get a letter"
+              : c.state === "skipped" && c.skipReason === "manual"
+                ? "Skipped by your team — it won’t get a letter"
+                : passedAll
+                  ? `Passed ${c.passedCount} of ${c.checks.length}${c.state === "added" ? " — included in today’s print run" : " — ready for a print run"}`
+                  : `Passed ${c.passedCount} of ${c.checks.length}${c.state === "address_issue" ? " — fix the address to send a letter" : " — no letter"}`}
           </p>
         </Card>
 
@@ -94,25 +108,16 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
             Exclude
           </h2>
           <p className="mt-2 text-[11px] leading-[15px] text-muted">
-            Use this when a company opts out or must not be contacted again.
+            {c.exclusion
+              ? `Excluded ${formatDate(c.exclusion.createdAt.toISOString())}${c.exclusion.reason ? ` · ${c.exclusion.reason}` : ""}`
+              : "Use this when a company opts out or must not be contacted again."}
           </p>
-          <ExcludeButton name={company.name} />
+          <ExcludeCard number={c.number} name={c.name} state={c.state} />
         </Card>
 
         <Card padding="p-[18px]">
-          <CardHeader
-            size="sm"
-            title="Print history"
-            aside={<StatusBadge tone="neutral" size="sm">None</StatusBadge>}
-          />
+          <CardHeader size="sm" title="Print history" aside={<StatusBadge tone="neutral" size="sm">None</StatusBadge>} />
           <p className="mt-1.5 text-[11px] leading-[15px] text-muted">No letter has been printed for this company yet.</p>
-          <Link
-            href="/print/preview"
-            className="mt-2.5 inline-flex items-center gap-1.5 text-[11px] font-bold leading-[15px] text-ink hover:text-brand"
-          >
-            <Icon icon={faPlus} size={10} />
-            Print letter
-          </Link>
         </Card>
 
         <Card padding="p-[18px]">
@@ -125,7 +130,7 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
               </Link>
             }
           />
-          <p className="mt-1 text-[11px] leading-[15px] text-muted">No internal notes yet. Notes are visible to your team only.</p>
+          <p className="mt-1 text-[11px] leading-[15px] text-muted">Notes are visible to your team only.</p>
         </Card>
       </div>
     </div>

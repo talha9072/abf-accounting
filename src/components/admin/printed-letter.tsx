@@ -95,7 +95,9 @@ export function PrintedLetter({
 
         {/* Body */}
         <div className="mt-[21px] flex flex-col gap-[10.35px] text-[8.94px] leading-[1.5]">
-          <p className="text-[9.41px] font-semibold">Dear {data.directorFirstName},</p>
+          <p className="text-[9.41px] font-semibold">
+            {data.directorFirstName ? `Dear ${data.directorFirstName},` : "To whom it may concern,"}
+          </p>
           <p>
             Congratulations on incorporating {data.companyName} on {data.incorporatedLong}.
           </p>

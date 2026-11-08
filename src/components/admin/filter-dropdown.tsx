@@ -6,34 +6,46 @@ import { Icon } from "@/components/ui/icon";
 import { Popover } from "@/components/ui/popover";
 import { cn } from "@/lib/cn";
 
+export type FilterOption = string | { value: string; label: string };
+const val = (o: FilterOption) => (typeof o === "string" ? o : o.value);
+const lab = (o: FilterOption) => (typeof o === "string" ? o : o.label);
+
 /**
  * Filter chip with a two-line label (Figma "Filter / …") and an options menu
- * (Figma "Dropdown / Incorporated").
+ * (Figma "Dropdown / Incorporated"). Uncontrolled by default; pass `value` +
+ * `onChange` to drive it from the URL.
  */
 export function FilterDropdown({
   icon,
   label,
   options,
   defaultValue,
+  value: controlled,
+  onChange,
   footnote,
   variant = "stacked",
   className,
 }: {
   icon: IconDefinition;
   label: string;
-  options: string[];
+  options: FilterOption[];
   defaultValue?: string;
+  value?: string;
+  onChange?: (value: string) => void;
   footnote?: string;
   variant?: "stacked" | "inline";
   className?: string;
 }) {
-  const [value, setValue] = useState(defaultValue ?? options[0]);
+  const [internal, setInternal] = useState(defaultValue ?? val(options[0]));
+  const value = controlled ?? internal;
+  const current = options.find((o) => val(o) === value) ?? options[0];
+  const shown = lab(current).replace(" (default)", "");
 
   return (
     <Popover
       align="start"
       className={className}
-      panelClassName="w-[280px]"
+      panelClassName="w-[280px] max-h-[420px] overflow-y-auto scroll-area"
       trigger={({ toggle, open }) => (
         <button
           type="button"
@@ -51,10 +63,10 @@ export function FilterDropdown({
           {variant === "stacked" ? (
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="text-[9px] font-medium leading-3 text-muted">{label}</span>
-              <span className="truncate text-[11px] font-medium leading-[14px] text-ink">{value.replace(" (default)", "")}</span>
+              <span className="truncate text-[11px] font-medium leading-[14px] text-ink">{shown}</span>
             </span>
           ) : (
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-[18px] text-ink">{value.replace(" (default)", "")}</span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-[18px] text-ink">{shown}</span>
           )}
           <span className="text-muted">
             <Icon icon={faChevronDown} size={8} />
@@ -65,23 +77,25 @@ export function FilterDropdown({
       {(close) => (
         <div role="listbox" aria-label={label} className="flex flex-col gap-0.5">
           {options.map((opt) => {
-            const selected = opt === value;
+            const v = val(opt);
+            const selected = v === value;
             return (
               <button
-                key={opt}
+                key={v}
                 type="button"
                 role="option"
                 aria-selected={selected}
                 onClick={() => {
-                  setValue(opt);
+                  if (controlled === undefined) setInternal(v);
+                  onChange?.(v);
                   close();
                 }}
                 className={cn(
-                  "flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px] leading-[18px]",
+                  "flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] leading-[18px]",
                   selected ? "bg-mint font-medium text-brand" : "text-ink hover:bg-canvas",
                 )}
               >
-                {opt}
+                {lab(opt)}
                 {selected ? <Icon icon={faCheck} size={11} /> : null}
               </button>
             );
