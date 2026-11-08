@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { faArrowUpRightFromSquare, faEnvelope } from "@fortawesome/free-solid-svg-icons";
-import { PrintedLetter } from "@/components/admin/printed-letter";
+import { FitLetter } from "@/components/admin/fit-letter";
 import { StatusBadge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
@@ -39,7 +39,7 @@ export default async function CompanyLettersPage({ params }: PageProps<"/new-com
   const rendered = await renderLetter(snapshot, business);
 
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[1060fr_500fr]">
+    <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-4 xl:grid-cols-[1060fr_500fr]">
       <Card padding="p-6">
         <CardHeader
           title="Letters"
@@ -137,7 +137,7 @@ export default async function CompanyLettersPage({ params }: PageProps<"/new-com
             {printed ? `${printed.runReference} · ${printed.template} · ${printed.printedDay}` : `Using ${tpl!.name} · ${tpl!.version} — final text is fixed when printed`}
           </p>
         </div>
-        <PrintedLetter width={384} letter={rendered} />
+        <FitLetter max={384} letter={rendered} />
       </section>
     </div>
   );

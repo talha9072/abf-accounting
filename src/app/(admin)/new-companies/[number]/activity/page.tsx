@@ -10,7 +10,7 @@ export default async function CompanyActivityPage({ params }: PageProps<"/new-co
   const c = await requireCompany(number);
   const items = await getCompanyActivity(c);
   return (
-    <div className="grid xl:grid-cols-[1028fr_532fr]">
+    <div className="grid grid-cols-1 [&>*]:min-w-0 xl:grid-cols-[1028fr_532fr]">
       <ActivityTimeline items={items} className="min-h-[304px]" />
     </div>
   );

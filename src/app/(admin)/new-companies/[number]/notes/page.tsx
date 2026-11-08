@@ -12,7 +12,7 @@ export default async function CompanyNotesPage({ params }: PageProps<"/new-compa
   const [c, user] = await Promise.all([requireCompany(number), requireUser()]);
   const notes = await listNotes(c.id, user);
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[1100fr_460fr]">
+    <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-4 xl:grid-cols-[1100fr_460fr]">
       <NotesEditor companyNumber={c.number} notes={notes} />
       <Card padding="p-6">
         <CardHeader title="About notes" size="md" />

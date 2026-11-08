@@ -26,7 +26,7 @@ export function DataTable({
 }) {
   return (
     <div className={cn("overflow-hidden rounded-[10px] border border-line bg-white", className)} style={{ ["--cols" as string]: columns }}>
-      <div className="overflow-x-auto scroll-area">
+      <div className="relative overflow-x-auto scroll-area">
         <div className="min-w-[1100px]">
           <div role="row" className="grid h-[34px] items-center gap-3 border-b border-n200 bg-n100 px-3 text-[11px] font-medium leading-[15px] text-muted [grid-template-columns:var(--cols)]">
             {header}

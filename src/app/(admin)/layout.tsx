@@ -1,3 +1,4 @@
+import { NavDrawerProvider } from "@/components/admin/nav-drawer";
 import { PullProvider } from "@/components/admin/pull-center";
 import { Sidebar } from "@/components/admin/sidebar";
 import { Topbar } from "@/components/admin/topbar";
@@ -16,15 +17,17 @@ export default async function AdminLayout({ children }: LayoutProps<"/">) {
   return (
     <ToastProvider>
       <PullProvider initial={pullOverview}>
-        <div className="flex min-h-screen bg-canvas">
-          <Sidebar counts={counts} />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Topbar user={{ name, email: user.email, initials }} notifications={notifications} />
-            <main id="main" className="flex flex-1 flex-col gap-[18px] px-9 pb-[30px] pt-7">
-              {children}
-            </main>
+        <NavDrawerProvider>
+          <div className="flex min-h-screen bg-canvas">
+            <Sidebar counts={counts} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <Topbar user={{ name, email: user.email, initials }} notifications={notifications} />
+              <main id="main" className="flex min-w-0 flex-1 flex-col gap-[18px] px-4 pb-[30px] pt-5 sm:px-6 sm:pt-7 lg:px-9">
+                {children}
+              </main>
+            </div>
           </div>
-        </div>
+        </NavDrawerProvider>
       </PullProvider>
     </ToastProvider>
   );

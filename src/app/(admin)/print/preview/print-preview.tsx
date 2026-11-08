@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { faArrowLeft, faChevronLeft, faChevronRight, faDownload, faPrint, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
-import { PrintedLetter } from "@/components/admin/printed-letter";
+import { FitLetter } from "@/components/admin/fit-letter";
 import { PrintSetupBanner, PrintSteps, usePrintFlow } from "@/components/admin/print-parts";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -65,7 +65,7 @@ export function PrintPreview({
           </p>
         </Card>
       ) : (
-        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section aria-label="Letter preview" className="flex flex-col items-center gap-6 rounded-[14px] border border-line bg-mint/50 px-6 pb-7 pt-6">
             <div className="flex items-center gap-3">
               <button
@@ -90,7 +90,7 @@ export function PrintPreview({
                 <Icon icon={faChevronRight} size={11} />
               </button>
             </div>
-            {l ? <PrintedLetter showEnvelopeWindow letter={l} /> : null}
+            {l ? <FitLetter showEnvelopeWindow letter={l} /> : null}
             <p className="text-[12px] leading-4 text-muted">
               Dashed area shows where the address appears through the envelope window. The guide does not print.
               {letters.length < total ? ` Showing the first ${letters.length} letters.` : ""}

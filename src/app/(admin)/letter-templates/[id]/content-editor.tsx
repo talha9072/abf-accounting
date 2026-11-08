@@ -20,7 +20,7 @@ import {
   faTextSlash,
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
-import { PrintedLetter } from "@/components/admin/printed-letter";
+import { FitLetter } from "@/components/admin/fit-letter";
 import { StatusBadge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
@@ -319,7 +319,7 @@ export function ContentEditor({ template, preview }: { template: TemplateProps; 
             </span>
           </div>
           <div className="mt-3 flex justify-center rounded-lg bg-canvas py-3">
-            <PrintedLetter letter={letter} width={340} />
+            <FitLetter letter={letter} max={340} />
           </div>
         </section>
       </div>

@@ -148,7 +148,7 @@ export function TemplateWorkspace({ list, template, children }: { list: Template
         }
       />
 
-      <div className="grid items-start gap-4 xl:grid-cols-[392px_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-4 xl:grid-cols-[392px_minmax(0,1fr)]">
         {/* Library */}
         <aside aria-label="Templates" className="flex flex-col gap-3 rounded-[14px] border border-line bg-white p-4 xl:sticky xl:top-[100px] xl:min-h-[calc(100vh-232px)]">
           <div className="flex items-center justify-between">

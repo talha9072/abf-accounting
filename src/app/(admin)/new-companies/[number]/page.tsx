@@ -41,7 +41,7 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
   const passedAll = c.passedCount === c.checks.length;
 
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[1028fr_532fr]">
+    <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-4 xl:grid-cols-[1028fr_532fr]">
       <div className="flex min-w-0 flex-col gap-4">
         <Card>
           <CardHeader

@@ -45,7 +45,7 @@ export function AccountForms({ account }: { account: Account }) {
   ].join(" · ");
 
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[1032fr_520fr]">
+    <div className="grid grid-cols-1 [&>*]:min-w-0 items-start gap-6 xl:grid-cols-[1032fr_520fr]">
       <div className="flex flex-col gap-6">
         {/* Your details */}
         <form

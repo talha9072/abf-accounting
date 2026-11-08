@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   faBan,
+  faBars,
   faBell,
   faBuilding,
   faCircleCheck,
@@ -19,6 +20,7 @@ import {
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/button";
 import { MenuItem, Popover } from "@/components/ui/popover";
+import { useNavDrawer } from "@/components/admin/nav-drawer";
 import { signOutAction } from "@/lib/auth/actions";
 import { getNotificationsAction, markAllReadAction } from "@/lib/notifications/actions";
 import type { NotificationItem } from "@/lib/notifications/server";
@@ -30,6 +32,7 @@ type NotificationsData = { items: NotificationItem[]; unread: number };
 export function Topbar({ user, notifications }: { user: TopbarUser; notifications: NotificationsData }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [isMac, setIsMac] = useState(false);
+  const drawer = useNavDrawer();
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- platform detection must run on the client
@@ -45,23 +48,35 @@ export function Topbar({ user, notifications }: { user: TopbarUser; notification
   }, []);
 
   return (
-    <header className="sticky top-0 z-30 flex h-[76px] shrink-0 items-center justify-between gap-6 border-b border-line bg-white px-9">
-      <div className="relative w-full max-w-[600px]">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-3 border-b border-line bg-white px-4 sm:h-[76px] sm:gap-6 sm:px-6 lg:px-9">
+      <button
+        type="button"
+        onClick={drawer.toggle}
+        aria-label="Open menu"
+        aria-controls="main-nav"
+        aria-expanded={drawer.open}
+        className="flex size-[42px] shrink-0 items-center justify-center rounded-[10px] border border-line text-ink hover:bg-canvas lg:hidden"
+      >
+        <Icon icon={faBars} size={15} />
+      </button>
+      <div className="relative min-w-0 w-full max-w-[600px]">
         <button
           type="button"
           onClick={() => setSearchOpen(true)}
           className="flex h-[42px] w-full items-center gap-2.5 rounded-[10px] border border-line bg-canvas px-3.5 text-left text-[13px] leading-[18px] text-muted transition-colors hover:border-n400"
         >
           <Icon icon={faMagnifyingGlass} size={13} />
-          <span className="flex-1 truncate">Search companies or company numbers…</span>
-          <kbd className="rounded-md border border-line bg-white px-2 py-1 font-sans text-[10px] font-medium leading-[14px] text-muted">
+          <span className="flex-1 truncate">
+            Search<span className="hidden sm:inline"> companies or company numbers</span>…
+          </span>
+          <kbd className="hidden rounded-md sm:inline border border-line bg-white px-2 py-1 font-sans text-[10px] font-medium leading-[14px] text-muted">
             {isMac ? "⌘ K" : "Ctrl K"}
           </kbd>
         </button>
         {searchOpen ? <SearchPanel onClose={() => setSearchOpen(false)} /> : null}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
         <NotificationsMenu initial={notifications} />
         <AccountMenu user={user} />
       </div>
@@ -120,7 +135,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
       ref={panelRef}
       role="dialog"
       aria-label="Search"
-      className="absolute left-0 top-0 z-50 w-[560px] max-w-[calc(100vw-340px)] animate-pop-in rounded-[14px] border border-line bg-white p-2 shadow-[0_16px_40px_rgb(10_31_59/0.16)]"
+      className="fixed inset-x-3 top-3 z-50 animate-pop-in lg:absolute lg:inset-x-auto lg:left-0 lg:top-0 lg:w-[560px] lg:max-w-[calc(100vw-340px)] rounded-[14px] border border-line bg-white p-2 shadow-[0_16px_40px_rgb(10_31_59/0.16)]"
     >
       <div className="flex items-center gap-3 px-3 py-2.5">
         <span className="text-muted">
@@ -152,7 +167,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
         <kbd className="font-sans text-[11px] text-muted">esc</kbd>
       </div>
 
-      <div className="max-h-[420px] overflow-y-auto scroll-area">
+      <div className="max-h-[min(420px,calc(100dvh-120px))] overflow-y-auto scroll-area">
         <p className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted">Companies</p>
         {results.companies.length === 0 ? (
           <p className="px-3 py-3 text-[13px] text-muted">
@@ -243,6 +258,7 @@ function NotificationsMenu({ initial }: { initial: NotificationsData }) {
 
   return (
     <Popover
+      fixed
       panelClassName="w-[380px]"
       trigger={({ toggle, open }) => (
         <IconButton

@@ -10,6 +10,7 @@ import {
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
 import { Logo } from "@/components/brand/logo";
+import { useNavDrawer } from "@/components/admin/nav-drawer";
 import { usePull } from "@/components/admin/pull-center";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/cn";
@@ -20,6 +21,7 @@ export type SidebarCounts = { toReview: number; inRun: number };
 
 export function Sidebar({ counts }: { counts: SidebarCounts }) {
   const pathname = usePathname();
+  const drawer = useNavDrawer();
   const fmt = (n: number) => n.toLocaleString("en-GB");
   const NAV: NavItem[] = [
     { href: "/new-companies", label: "New Companies", icon: faBuilding, count: counts.toReview ? fmt(counts.toReview) : undefined, title: "Ready, not reviewed yet" },
@@ -29,7 +31,21 @@ export function Sidebar({ counts }: { counts: SidebarCounts }) {
   ];
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[272px] shrink-0 flex-col gap-[18px] bg-[linear-gradient(180deg,#0d333f_0%,#09242d_60%,#09242d_100%)] px-6 pb-6 pt-[26px] text-white">
+    <>
+      {drawer.open ? <div aria-hidden className="fixed inset-0 z-40 bg-ink/45 lg:hidden" onClick={() => drawer.setOpen(false)} /> : null}
+      <aside
+        id="main-nav"
+        // Below lg it's a slide-in drawer (opened from the top bar); from lg up it's the fixed left column.
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex h-dvh w-[272px] shrink-0 flex-col gap-[18px] overflow-y-auto bg-[linear-gradient(180deg,#0d333f_0%,#09242d_60%,#09242d_100%)] px-6 pb-6 pt-[26px] text-white transition-transform duration-200",
+          "lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:translate-x-0 lg:shadow-none",
+          drawer.open ? "translate-x-0 shadow-2xl" : "-translate-x-full",
+        )}
+        onClick={(e) => {
+          // Close the drawer after following a link inside it.
+          if ((e.target as HTMLElement).closest("a")) drawer.setOpen(false);
+        }}
+      >
       <Link href="/new-companies" aria-label="ABF New Companies home" className="self-start rounded-md">
         <Logo variant="white" width={176} />
       </Link>
@@ -70,7 +86,8 @@ export function Sidebar({ counts }: { counts: SidebarCounts }) {
       </nav>
 
       <PullStatusCard />
-    </aside>
+      </aside>
+    </>
   );
 }
 

@@ -71,8 +71,14 @@ export function Popover({
     const h = panelRef.current?.offsetHeight ?? 0;
     const below = window.innerHeight - t.bottom;
     const up = below < h + 16 && t.top > below;
-    const horizontal = align === "end" ? { right: Math.max(8, window.innerWidth - t.right) } : { left: Math.max(8, t.left) };
-    setPos({ position: "fixed", ...horizontal, ...(up ? { bottom: window.innerHeight - t.top + 8 } : { top: t.bottom + 8 }) });
+    // Keep the whole panel on screen (phones): never wider than the viewport, nudged in from either edge.
+    const vw = window.innerWidth;
+    const w = Math.min(panelRef.current?.offsetWidth ?? 0, vw - 16);
+    const horizontal =
+      align === "end"
+        ? { right: Math.min(Math.max(8, vw - t.right), Math.max(8, vw - w - 8)) }
+        : { left: Math.min(Math.max(8, t.left), Math.max(8, vw - w - 8)) };
+    setPos({ position: "fixed", maxWidth: vw - 16, ...horizontal, ...(up ? { bottom: window.innerHeight - t.top + 8 } : { top: t.bottom + 8 }) });
   }, [open, fixed, align]);
 
   const close = () => setOpen(false);

@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { faEye, faRotateLeft, faSpinner } from "@fortawesome/free-solid-svg-icons";
-import { PrintedLetter } from "@/components/admin/printed-letter";
+import { FitLetter } from "@/components/admin/fit-letter";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
@@ -100,7 +100,7 @@ export function VersionList({
       >
         {viewing ? (
           <div className="flex justify-center rounded-lg bg-canvas py-3">
-            <PrintedLetter letter={letterFor(viewing)} width={440} />
+            <FitLetter letter={letterFor(viewing)} max={440} />
           </div>
         ) : null}
       </Modal>

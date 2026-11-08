@@ -61,7 +61,7 @@ export function ViewChips({ items, className }: { items: TabItem[]; className?: 
  */
 export function BoxedTabs({ items, className }: { items: TabItem[]; className?: string }) {
   return (
-    <nav aria-label="Sections" className={cn("inline-flex items-center gap-1 rounded-xl bg-n100 p-1", className)}>
+    <nav aria-label="Sections" className={cn("scroll-area inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-xl bg-n100 p-1", className)}>
       {items.map((t) => (
         <Link
           key={t.href}
@@ -69,7 +69,7 @@ export function BoxedTabs({ items, className }: { items: TabItem[]; className?: 
           scroll={false}
           aria-current={t.active ? "page" : undefined}
           className={cn(
-            "inline-flex h-9 items-center gap-2 rounded-[9px] px-3.5 text-[13px] leading-[18px] transition-colors",
+            "inline-flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-[9px] px-3.5 text-[13px] leading-[18px] transition-colors",
             t.active ? "bg-white font-semibold text-ink shadow-[0_1px_2px_rgb(9_36_45/0.06)]" : "font-medium text-muted hover:text-ink",
           )}
         >
