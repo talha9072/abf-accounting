@@ -6,11 +6,11 @@ history of what was sent.
 
 Design source: Figma **ABF Accounting → 02 — New Companies Admin**.
 
-> **Status:** design build. Every screen, modal and menu from Figma is built and
-> interactive, using sample data from `src/lib/mock-data.ts`.
-> **Auth is fully working** against PostgreSQL. Business features (Companies
-> House pull, saving templates, real print runs) come next — the database
-> tables for them already exist.
+> **Status:** every screen runs on PostgreSQL — auth, the Companies House pull,
+> New Companies, print runs, letter templates, history, notes, notifications and
+> My account. Still to do before go-live: an email provider in `src/lib/mail.ts`
+> (emails are printed to the console in dev), two-step sign-in, and removing
+> `PULL_LIMIT` from the environment.
 
 ## Stack
 

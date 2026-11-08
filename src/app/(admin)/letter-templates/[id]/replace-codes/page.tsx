@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
-import { replaceCodes } from "@/lib/mock-data";
+import { codeExample, REPLACE_CODES } from "@/lib/letters/codes";
+import { getPreviewContext } from "@/lib/templates/preview";
+import { loadTemplate } from "../data";
 
 export const metadata: Metadata = { title: "Replace codes" };
 
-export default function ReplaceCodesPage() {
+export default async function ReplaceCodesPage({ params }: PageProps<"/letter-templates/[id]/replace-codes">) {
+  const { id } = await params;
+  const t = (await loadTemplate(id))!;
+  const { values, recipient } = await getPreviewContext(t.offer);
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[13px] leading-[18px] text-muted">
@@ -15,16 +20,16 @@ export default function ReplaceCodesPage() {
           <thead className="bg-canvas text-[11px] text-muted">
             <tr>
               <th scope="col" className="px-4 py-3.5 font-medium">Field</th>
-              <th scope="col" className="px-4 py-3.5 font-medium">Example (Northfield Studio Labs Ltd)</th>
+              <th scope="col" className="px-4 py-3.5 font-medium">Example ({recipient.companyName})</th>
               <th scope="col" className="px-4 py-3.5 font-medium">Comes from</th>
               <th scope="col" className="px-4 py-3.5 font-medium">If missing</th>
             </tr>
           </thead>
           <tbody>
-            {replaceCodes.map((c) => (
+            {REPLACE_CODES.map((c) => (
               <tr key={c.code} className="border-t border-line">
                 <th scope="row" className="whitespace-nowrap px-4 py-3 font-medium text-ink">{c.code}</th>
-                <td className="px-4 py-3 text-ink">{c.example}</td>
+                <td className="px-4 py-3 text-ink">{codeExample(c, values)}</td>
                 <td className="px-4 py-3 text-muted">{c.source}</td>
                 <td className="px-4 py-3 text-muted">{c.missing}</td>
               </tr>

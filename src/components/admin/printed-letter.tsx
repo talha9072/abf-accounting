@@ -3,28 +3,6 @@ import { Logo } from "@/components/brand/logo";
 import { Icon } from "@/components/ui/icon";
 import type { RenderedLetter } from "@/lib/letters/data";
 import { formatLongDate } from "@/lib/companies/format";
-import { business as sampleBusiness } from "@/lib/mock-data";
-
-/** Old design-stage shape — still used by screens that show a sample letter. */
-export type LetterData = {
-  directorFullName: string;
-  directorFirstName: string;
-  companyName: string;
-  addressLines: string[];
-  reference: string;
-  incorporatedLong: string;
-  letterDate: string;
-};
-
-export const sampleLetter: LetterData = {
-  directorFullName: "Sarah Ahmed",
-  directorFirstName: "Sarah",
-  companyName: "Northfield Studio Labs Ltd",
-  addressLines: ["18 Loom Street", "Manchester", "M1 2AB"],
-  reference: "ABF-17840124",
-  incorporatedLong: "22 September 2026",
-  letterDate: "23 September 2026",
-};
 
 const BASE_W = 560; // A4 drawn at 560 × 792 (2.667 px/mm), then scaled
 const BASE_H = 792;
@@ -36,8 +14,7 @@ type View = {
   reference: string;
   letterDate: string;
   greeting: string;
-  bodyHtml: string | null;
-  bodyFallback: string[];
+  bodyHtml: string;
   offer: string | null;
   cta: string | null;
   qrSvg: string | null;
@@ -45,29 +22,6 @@ type View = {
   signatory: string | null;
   business: { name: string; address: string; phone: string; email: string; web: string; registration: string };
 };
-
-function fromSample(d: LetterData): View {
-  return {
-    recipient: d.directorFullName,
-    companyName: d.companyName,
-    addressLines: d.addressLines,
-    reference: d.reference,
-    letterDate: d.letterDate,
-    greeting: d.directorFirstName ? `Dear ${d.directorFirstName},` : "To whom it may concern,",
-    bodyHtml: null,
-    bodyFallback: [
-      `Congratulations on incorporating ${d.companyName} on ${d.incorporatedLong}.`,
-      "ABF Accounting helps new UK companies get their bookkeeping, accounts and filings right from day one, with a dedicated accountant and clear fixed prices.",
-      "Our Business Starter services start from £65, and our Full Compliance Pack covers your Confirmation Statement, annual accounts and Corporation Tax return for a fixed £300.",
-    ],
-    offer: "Business Starter from £65",
-    cta: "Scan the code or visit abfaccounting.com/business-starter",
-    qrSvg: null,
-    signOff: "Kind regards,",
-    signatory: "Lekan",
-    business: sampleBusiness,
-  };
-}
 
 function fromRendered(l: RenderedLetter): View {
   return {
@@ -78,7 +32,6 @@ function fromRendered(l: RenderedLetter): View {
     letterDate: formatLongDate(l.letterDate),
     greeting: l.greeting,
     bodyHtml: l.bodyHtml,
-    bodyFallback: [],
     offer: l.offer,
     cta: l.cta,
     qrSvg: l.qrSvg,
@@ -94,22 +47,20 @@ function fromRendered(l: RenderedLetter): View {
  * `bodyHtml` is sanitised + merged on the server before it gets here.
  */
 export function PrintedLetter({
-  data = sampleLetter,
   letter,
   width = BASE_W,
   showEnvelopeWindow = false,
   className,
   flat = false,
 }: {
-  data?: LetterData;
-  letter?: RenderedLetter;
+  letter: RenderedLetter;
   width?: number;
   showEnvelopeWindow?: boolean;
   className?: string;
   /** No shadow (paper output). */
   flat?: boolean;
 }) {
-  const v = letter ? fromRendered(letter) : fromSample(data);
+  const v = fromRendered(letter);
   const scale = width / BASE_W;
   return (
     <div className={className} style={{ width, height: BASE_H * scale }} aria-label={`Letter to ${v.companyName}`} role="img">
@@ -164,14 +115,10 @@ export function PrintedLetter({
         {/* Body */}
         <div className="mt-[21px] flex flex-col gap-[10.35px] text-[8.94px] leading-[1.5]">
           <p className="text-[9.41px] font-semibold">{v.greeting}</p>
-          {v.bodyHtml !== null ? (
-            <div
-              className="flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_li]:ml-3 [&_ol]:list-decimal [&_ul]:list-disc"
-              dangerouslySetInnerHTML={{ __html: v.bodyHtml }}
-            />
-          ) : (
-            v.bodyFallback.map((p, i) => <p key={i}>{p}</p>)
-          )}
+          <div
+            className="flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_li]:ml-3 [&_ol]:list-decimal [&_ul]:list-disc"
+            dangerouslySetInnerHTML={{ __html: v.bodyHtml }}
+          />
         </div>
 
         {/* Offer card */}

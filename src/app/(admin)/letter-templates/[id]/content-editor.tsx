@@ -32,16 +32,12 @@ import { mergeCodes, mergeGreeting } from "@/lib/letters/merge";
 import type { RenderedLetter } from "@/lib/letters/data";
 import { saveContentAction } from "@/lib/templates/actions";
 import type { PreviewContext } from "@/lib/templates/preview";
-import { replaceCodes } from "@/lib/mock-data";
+import { codeExample, REPLACE_CODES } from "@/lib/letters/codes";
 import { useTemplateEditor } from "./template-workspace";
 
 /** Codes that make sense inside the letter text (head/footer/QR are drawn by the layout). */
-const BODY_CODES = [
-  "##COMPANY_NAME#", "##DIRECTOR_FIRSTNAME#", "##DIRECTOR_FULLNAME#", "##REGISTERED_ADDRESS#", "##COMPANY_NUMBER#",
-  "##INCORPORATION_DATE#", "##REFERENCE#", "##OFFER#", "##LETTER_DATE#", "##BRAND_NAME#", "##BRAND_SUPPORT_TELEPHONE#",
-  "##BRAND_SUPPORT_EMAIL#",
-];
-const MENU_CODES = replaceCodes.filter((c) => BODY_CODES.includes(c.code));
+const MENU_CODES = REPLACE_CODES.filter((c) => c.inBody);
+const BODY_CODES = MENU_CODES.map((c) => c.code);
 
 type TemplateProps = {
   id: string;
@@ -219,7 +215,7 @@ export function ContentEditor({ template, preview }: { template: TemplateProps; 
                         className="flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left hover:bg-mint"
                       >
                         <span className="text-[13px] font-medium leading-[18px] text-ink">{c.code}</span>
-                        <span className="text-[11px] leading-[15px] text-muted">{c.menu}</span>
+                        <span className="text-[11px] leading-[15px] text-muted">{codeExample(c, { ...preview.values, OFFER: offer })}</span>
                       </button>
                     </li>
                   ))}
