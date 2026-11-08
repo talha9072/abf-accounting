@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
-import { templates } from "@/lib/mock-data";
+import { defaultTemplateId } from "@/lib/templates/queries";
 
-export default function LetterTemplatesIndex() {
-  redirect(`/letter-templates/${templates[0].id}`);
+export default async function LetterTemplatesIndex() {
+  const id = await defaultTemplateId();
+  redirect(id ? `/letter-templates/${id}` : "/print");
 }

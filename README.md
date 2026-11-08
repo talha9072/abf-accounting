@@ -96,6 +96,10 @@ Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s)
 5. **Print labels** opens `/print-doc/{run}/labels` — A4, 2 × 6 labels of 98 × 46 mm, same order as the letters, with “start at label” for part-used sheets and a test sheet.
 6. **History → Print runs** shows every run; reprint all or a range (paper jam) without changing any dates.
 
+### Letter templates
+
+`/letter-templates` lists every template (default first). **Content** edits the letter text with a live preview filled in with a real company; replace codes are inserted from the chips or the menu, unknown codes are flagged. **Save changes** creates a new version (`v3.4 → v3.5`) only when the text changes. **Settings** holds name, status (Active / Draft / Archived), default, greeting, sign-off, signatory, offer and CTA — there is always exactly one Active default. **Version history** lets you view any version and restore it (as a new version). **New template** copies the current one or starts blank (as a Draft); **Duplicate** makes a copy. **Print a test letter** / **Preview** open `/print-doc/test/{id}` — nothing is recorded. Leaving with unsaved edits asks first.
+
 Template HTML is reduced to an allow-list of formatting tags and every merged value is HTML-escaped (`src/lib/letters`). Checks: `npx tsx scripts/test-letters.ts`.
 
 ## Going live — database

@@ -1,27 +1,22 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   faBars,
   faBold,
-  faChevronDown,
   faCircleInfo,
-  faCode,
-  faExpand,
   faGripLines,
-  faImage,
   faIndent,
   faItalic,
-  faLink,
   faListOl,
   faListUl,
+  faLock,
   faOutdent,
-  faQuestion,
   faQuoteLeft,
   faRotateLeft,
   faRotateRight,
   faStrikethrough,
-  faTable,
   faTextSlash,
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
@@ -29,54 +24,126 @@ import { PrintedLetter } from "@/components/admin/printed-letter";
 import { StatusBadge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
+import { Note } from "@/components/ui/modal";
 import { Popover } from "@/components/ui/popover";
+import { useToast } from "@/components/ui/toast";
+import { sanitizeTemplateHtml } from "@/lib/letters/html";
+import { mergeCodes, mergeGreeting } from "@/lib/letters/merge";
+import type { RenderedLetter } from "@/lib/letters/data";
+import { saveContentAction } from "@/lib/templates/actions";
+import type { PreviewContext } from "@/lib/templates/preview";
 import { replaceCodes } from "@/lib/mock-data";
-import { useMarkDirty } from "./template-workspace";
+import { useTemplateEditor } from "./template-workspace";
 
-const CHIP_CODES = [
-  "##DIRECTOR_FIRSTNAME#", "##REFERENCE#", "##COMPANY_NAME#", "##QR_CODE#", "##REGISTERED_ADDRESS#",
-  "##OFFER#", "##COMPANY_NUMBER#", "##BRAND_NAME#", "##INCORPORATION_DATE#", "##LETTER_HEAD#", "##LETTER_FOOTER#",
+/** Codes that make sense inside the letter text (head/footer/QR are drawn by the layout). */
+const BODY_CODES = [
+  "##COMPANY_NAME#", "##DIRECTOR_FIRSTNAME#", "##DIRECTOR_FULLNAME#", "##REGISTERED_ADDRESS#", "##COMPANY_NUMBER#",
+  "##INCORPORATION_DATE#", "##REFERENCE#", "##OFFER#", "##LETTER_DATE#", "##BRAND_NAME#", "##BRAND_SUPPORT_TELEPHONE#",
+  "##BRAND_SUPPORT_EMAIL#",
 ];
+const MENU_CODES = replaceCodes.filter((c) => BODY_CODES.includes(c.code));
 
-const MENU_CODES = replaceCodes.filter((c) =>
-  [
-    "##DIRECTOR_FIRSTNAME#", "##COMPANY_NAME#", "##REGISTERED_ADDRESS#", "##COMPANY_NUMBER#", "##INCORPORATION_DATE#",
-    "##REFERENCE#", "##OFFER#", "##QR_CODE#", "##BRAND_NAME#", "##LETTER_HEAD#", "##LETTER_FOOTER#",
-  ].includes(c.code),
-);
+type TemplateProps = {
+  id: string;
+  name: string;
+  contentHtml: string;
+  offer: string;
+  cta: string;
+  greeting: string;
+  signOff: string;
+  signatory: string;
+  readOnly: boolean;
+};
 
-/**
- * Initial letter body. Static, trusted markup — when templates are loaded from
- * the database this HTML must be sanitised (allow-list) before rendering.
- */
-const INITIAL_HTML = `
-<p>##LETTER_HEAD#</p>
-<p>Dear ##DIRECTOR_FIRSTNAME#,</p>
-<p>Congratulations on incorporating ##COMPANY_NAME# on ##INCORPORATION_DATE#.</p>
-<p>ABF Accounting helps new UK companies get their bookkeeping, accounts and filings right from day one, with a dedicated accountant and clear fixed prices.</p>
-<p><span class="text-brand">Current offer:</span>&nbsp; <span class="code-chip" contenteditable="false">##OFFER#</span></p>
-<p>Our Business Starter services start from £65, and our Full Compliance Pack covers your Confirmation Statement, annual accounts and Corporation Tax return for a fixed £300. Scan the QR code or quote ##REFERENCE# when you get in touch.</p>
-<p>Kind regards,</p>
-<p>##BRAND_NAME#</p>
-<p>Tel: ##BRAND_SUPPORT_TELEPHONE#<br>Email: ##BRAND_SUPPORT_EMAIL#</p>
-<p>##LETTER_FOOTER#</p>`;
-
-export function ContentEditor({ name }: { name: string }) {
+export function ContentEditor({ template, preview }: { template: TemplateProps; preview: PreviewContext }) {
+  const router = useRouter();
+  const toast = useToast();
+  const { markDirty, registerSave } = useTemplateEditor();
   const editorRef = useRef<HTMLDivElement>(null);
-  const markDirty = useMarkDirty();
+  const ro = template.readOnly;
+
+  const [name, setName] = useState(template.name);
+  const [html, setHtml] = useState(template.contentHtml);
+  const [offer, setOffer] = useState(template.offer);
+  const [cta, setCta] = useState(template.cta);
+  const [errors, setErrors] = useState<Record<string, string[] | undefined>>({});
+
+  // Fill the editable area once (React must not re-render it while typing).
+  useEffect(() => {
+    if (editorRef.current) editorRef.current.innerHTML = template.contentHtml;
+  }, [template.contentHtml]);
+
+  // Latest values for the registered save function.
+  const latest = useRef({ name, html, offer, cta });
+  useEffect(() => {
+    latest.current = { name, html, offer, cta };
+  }, [name, html, offer, cta]);
+
+  useEffect(() => {
+    if (ro) return registerSave(null);
+    registerSave(async () => {
+      const v = latest.current;
+      const r = await saveContentAction({ id: template.id, name: v.name, contentHtml: v.html, offer: v.offer, cta: v.cta });
+      if (!r.ok) {
+        setErrors(r.fieldErrors ?? {});
+        toast({ message: r.message });
+        return false;
+      }
+      setErrors({});
+      toast({ message: r.message });
+      router.refresh();
+      return true;
+    });
+    return () => registerSave(null);
+  }, [registerSave, ro, router, template.id, toast]);
+
+  const touch = () => markDirty(true);
+  const syncHtml = () => {
+    setHtml(editorRef.current?.innerHTML ?? "");
+    touch();
+  };
 
   const exec = (command: string, value?: string) => {
+    if (ro) return;
     editorRef.current?.focus();
-    // execCommand is deprecated but still the simplest dependency-free option
-    // for a design-stage editor. Swap for TipTap/Lexical when wiring saving.
+    // execCommand is deprecated but still the simplest dependency-free rich-text option here.
+    // The result is always re-sanitised on the server before it's stored or printed.
     document.execCommand(command, false, value);
-    markDirty(true);
+    syncHtml();
   };
   const insertCode = (code: string) => exec("insertText", code);
+
+  /** Live preview with a real company — same sanitise + merge as printing. */
+  const letter: RenderedLetter = useMemo(() => {
+    const values = { ...preview.values, OFFER: offer };
+    return {
+      ...preview.recipient,
+      bodyHtml: mergeCodes(sanitizeTemplateHtml(html), values),
+      greeting: mergeGreeting(template.greeting, values),
+      signOff: template.signOff,
+      signatory: template.signatory || null,
+      offer: offer || null,
+      cta: cta || null,
+      qrUrl: null,
+      qrSvg: preview.qrSvg,
+      business: preview.business,
+    };
+  }, [html, offer, cta, preview, template.greeting, template.signOff, template.signatory]);
+
+  const unknownCodes = useMemo(() => {
+    const known = new Set([...BODY_CODES, "##LETTER_HEAD#", "##LETTER_FOOTER#", "##QR_CODE#"]);
+    return [...new Set(html.match(/##[A-Z_]+#/g) ?? [])].filter((c) => !known.has(c));
+  }, [html]);
 
   return (
     <div className="grid items-start gap-4 min-[1680px]:grid-cols-[minmax(0,664fr)_452fr]">
       <div className="flex min-w-0 flex-col gap-3.5">
+        {ro ? (
+          <Note tone="neutral" icon={faLock}>
+            This template is archived and read-only. Set it back to Active or Draft in Settings to edit it.
+          </Note>
+        ) : null}
+
         <div className="flex items-center gap-2">
           <label htmlFor="tpl-internal-name" className="text-[12px] font-medium leading-4 text-ink">
             Internal template name
@@ -87,127 +154,136 @@ export function ContentEditor({ name }: { name: string }) {
         </div>
         <Input
           id="tpl-internal-name"
-          defaultValue={name}
+          value={name}
           maxLength={120}
           required
-          onChange={() => markDirty(true)}
+          disabled={ro}
+          aria-invalid={errors.name ? true : undefined}
+          onChange={(e) => (setName(e.target.value), touch())}
           className="h-10 rounded-[9px] px-3"
         />
+        {errors.name ? <p className="-mt-2 text-[12px] text-danger">{errors.name[0]}</p> : null}
 
-        <p className="mt-1 flex items-center gap-2 text-[12px] font-medium leading-4 text-ink">
-          Letter content <span className="text-[10px] font-normal text-muted">Replace codes fill automatically</span>
+        <p className="mt-1 flex flex-wrap items-center gap-2 text-[12px] font-medium leading-4 text-ink">
+          Letter content{" "}
+          <span className="text-[10px] font-normal text-muted">
+            Replace codes fill automatically · greeting, offer box, sign-off, letterhead and footer are added for you
+          </span>
         </p>
 
         <div className="overflow-hidden rounded-[10px] border border-line bg-white">
           {/* Toolbar */}
-          <div role="toolbar" aria-label="Formatting" className="flex flex-col gap-2 border-b border-line bg-canvas px-2.5 py-2.5">
-            <div className="flex flex-wrap items-center gap-1">
-              <Tool icon={faRotateLeft} label="Undo" onClick={() => exec("undo")} />
-              <Tool icon={faRotateRight} label="Redo" onClick={() => exec("redo")} />
-              <Sep />
-              <Tool icon={faBold} label="Bold" onClick={() => exec("bold")} />
-              <Tool icon={faItalic} label="Italic" onClick={() => exec("italic")} />
-              <Tool icon={faStrikethrough} label="Strikethrough" onClick={() => exec("strikeThrough")} />
-              <Tool icon={faTextSlash} label="Clear formatting" onClick={() => exec("removeFormat")} />
-              <Sep />
-              <Tool icon={faListOl} label="Numbered list" onClick={() => exec("insertOrderedList")} />
-              <Tool icon={faListUl} label="Bullet list" onClick={() => exec("insertUnorderedList")} />
-              <Tool icon={faOutdent} label="Outdent" onClick={() => exec("outdent")} />
-              <Tool icon={faIndent} label="Indent" onClick={() => exec("indent")} />
-              <Tool icon={faQuoteLeft} label="Quote" onClick={() => exec("formatBlock", "blockquote")} />
-              <Sep />
-              <Tool icon={faLink} label="Link" onClick={() => {}} />
-              <Tool icon={faImage} label="Image" onClick={() => {}} />
-              <Tool icon={faTable} label="Table" onClick={() => {}} />
-              <Tool icon={faGripLines} label="Horizontal line" onClick={() => exec("insertHorizontalRule")} />
-              <Tool label="Special character" onClick={() => exec("insertText", "£")}>
-                <span className="text-[13px] font-semibold">Ω</span>
-              </Tool>
-            </div>
-            <div className="flex flex-wrap items-center gap-1">
-              <SelectTool label="Styles" />
-              <SelectTool label="Format" />
-              <Sep />
-              <Tool icon={faExpand} label="Full screen" onClick={() => {}} />
-              <Tool icon={faCode} label="Source code" onClick={() => {}} />
-              <Tool icon={faQuestion} label="Help" onClick={() => {}} />
-              <Sep />
-              <Popover
-                align="start"
-                panelClassName="w-[300px] max-h-[460px] overflow-y-auto scroll-area"
-                trigger={({ toggle, open }) => (
-                  <button
-                    type="button"
-                    onClick={toggle}
-                    aria-expanded={open}
-                    className="inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-[11px] font-semibold text-ink hover:bg-white"
-                  >
-                    <Icon icon={faBars} size={10} />
-                    Insert replace code
-                  </button>
-                )}
-              >
-                {(close) => (
-                  <ul className="flex flex-col">
-                    {MENU_CODES.map((c) => (
-                      <li key={c.code}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            insertCode(c.code);
-                            close();
-                          }}
-                          className="flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left hover:bg-mint"
-                        >
-                          <span className="text-[13px] font-medium leading-[18px] text-ink">{c.code}</span>
-                          <span className="text-[11px] leading-[15px] text-muted">{c.menu}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Popover>
-            </div>
+          <div role="toolbar" aria-label="Formatting" className="flex flex-wrap items-center gap-1 border-b border-line bg-canvas px-2.5 py-2.5">
+            <Tool icon={faRotateLeft} label="Undo" onClick={() => exec("undo")} disabled={ro} />
+            <Tool icon={faRotateRight} label="Redo" onClick={() => exec("redo")} disabled={ro} />
+            <Sep />
+            <Tool icon={faBold} label="Bold" onClick={() => exec("bold")} disabled={ro} />
+            <Tool icon={faItalic} label="Italic" onClick={() => exec("italic")} disabled={ro} />
+            <Tool icon={faStrikethrough} label="Strikethrough" onClick={() => exec("strikeThrough")} disabled={ro} />
+            <Tool icon={faTextSlash} label="Clear formatting" onClick={() => exec("removeFormat")} disabled={ro} />
+            <Sep />
+            <Tool icon={faListOl} label="Numbered list" onClick={() => exec("insertOrderedList")} disabled={ro} />
+            <Tool icon={faListUl} label="Bullet list" onClick={() => exec("insertUnorderedList")} disabled={ro} />
+            <Tool icon={faOutdent} label="Outdent" onClick={() => exec("outdent")} disabled={ro} />
+            <Tool icon={faIndent} label="Indent" onClick={() => exec("indent")} disabled={ro} />
+            <Tool icon={faQuoteLeft} label="Quote" onClick={() => exec("formatBlock", "blockquote")} disabled={ro} />
+            <Tool icon={faGripLines} label="Horizontal line" onClick={() => exec("insertHorizontalRule")} disabled={ro} />
+            <Tool label="Pound sign" onClick={() => exec("insertText", "£")} disabled={ro}>
+              <span className="text-[13px] font-semibold">£</span>
+            </Tool>
+            <Sep />
+            <Popover
+              align="start"
+              panelClassName="w-[300px] max-h-[460px] overflow-y-auto scroll-area"
+              trigger={({ toggle, open }) => (
+                <button
+                  type="button"
+                  onClick={toggle}
+                  disabled={ro}
+                  aria-expanded={open}
+                  className="inline-flex h-8 items-center gap-2 rounded-lg px-2.5 text-[11px] font-semibold text-ink hover:bg-white disabled:opacity-50"
+                >
+                  <Icon icon={faBars} size={10} />
+                  Insert replace code
+                </button>
+              )}
+            >
+              {(close) => (
+                <ul className="flex flex-col">
+                  {MENU_CODES.map((c) => (
+                    <li key={c.code}>
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => (insertCode(c.code), close())}
+                        className="flex w-full flex-col gap-0.5 rounded-lg px-3 py-2.5 text-left hover:bg-mint"
+                      >
+                        <span className="text-[13px] font-medium leading-[18px] text-ink">{c.code}</span>
+                        <span className="text-[11px] leading-[15px] text-muted">{c.menu}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Popover>
           </div>
 
           {/* Editable letter body */}
           <div
             ref={editorRef}
-            contentEditable
+            contentEditable={!ro}
             suppressContentEditableWarning
             role="textbox"
             aria-multiline="true"
             aria-label="Letter content"
+            aria-readonly={ro}
             spellCheck
-            onInput={() => markDirty(true)}
-            className="min-h-[360px] px-5 py-4 text-[12px] leading-[18px] text-ink outline-none [&_.code-chip]:rounded-full [&_.code-chip]:bg-mint [&_.code-chip]:px-2.5 [&_.code-chip]:py-1 [&_.code-chip]:font-medium [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
-            dangerouslySetInnerHTML={{ __html: INITIAL_HTML }}
+            onInput={syncHtml}
+            onPaste={(e) => {
+              // Paste as plain text so no foreign formatting/markup sneaks in.
+              e.preventDefault();
+              document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+              syncHtml();
+            }}
+            className="min-h-[300px] px-5 py-4 text-[13px] leading-[20px] text-ink outline-none [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
           />
         </div>
+        {unknownCodes.length ? (
+          <Note tone="warning" icon={faCircleInfo}>
+            Unknown replace {unknownCodes.length === 1 ? "code" : "codes"}: {unknownCodes.join(", ")} — {unknownCodes.length === 1 ? "it" : "they"} would
+            print as written. Check the spelling against the Replace codes tab.
+          </Note>
+        ) : null}
 
         {/* Offer & CTA */}
         <section className="rounded-[14px] border border-line bg-white p-3.5">
           <div className="flex items-center justify-between">
             <h3 className="text-[12px] font-bold leading-4 text-ink">Offer &amp; call to action</h3>
             <span className="inline-flex h-6 items-center rounded-full border border-line px-2.5 text-[10px] font-medium text-ink">
-              Applies to every letter
+              Shown in the box with the QR code
             </span>
           </div>
           <div className="mt-2.5 grid gap-2.5 sm:grid-cols-2">
-            <label className="flex flex-col gap-0.5 rounded-lg bg-canvas px-2.5 py-2">
-              <span className="text-[9px] leading-3 text-muted">Default offer</span>
+            <label className="flex flex-col gap-0.5 rounded-lg bg-canvas px-2.5 py-2 focus-within:ring-2 focus-within:ring-brand/20">
+              <span className="text-[9px] leading-3 text-muted">Default offer (##OFFER#)</span>
               <input
-                defaultValue="Business Starter from £65"
-                onChange={() => markDirty(true)}
-                className="bg-transparent text-[11px] font-medium text-ink outline-none"
+                value={offer}
+                maxLength={200}
+                disabled={ro}
+                onChange={(e) => (setOffer(e.target.value), touch())}
+                placeholder="e.g. Business Starter from £65"
+                className="bg-transparent text-[12px] font-medium text-ink outline-none"
               />
             </label>
-            <label className="flex flex-col gap-0.5 rounded-lg bg-canvas px-2.5 py-2">
-              <span className="text-[9px] leading-3 text-muted">CTA</span>
+            <label className="flex flex-col gap-0.5 rounded-lg bg-canvas px-2.5 py-2 focus-within:ring-2 focus-within:ring-brand/20">
+              <span className="text-[9px] leading-3 text-muted">Call to action</span>
               <input
-                defaultValue="See Business Starter →"
-                onChange={() => markDirty(true)}
-                className="bg-transparent text-[11px] font-medium text-ink outline-none"
+                value={cta}
+                maxLength={200}
+                disabled={ro}
+                onChange={(e) => (setCta(e.target.value), touch())}
+                placeholder="e.g. Scan the code or visit …"
+                className="bg-transparent text-[12px] font-medium text-ink outline-none"
               />
             </label>
           </div>
@@ -223,31 +299,31 @@ export function ContentEditor({ name }: { name: string }) {
             </span>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {CHIP_CODES.map((code) => (
+            {BODY_CODES.map((code) => (
               <button
                 key={code}
                 type="button"
+                disabled={ro}
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => insertCode(code)}
-                className="inline-flex h-7 items-center rounded-md border border-line bg-canvas px-2.5 text-[10px] font-medium text-ink transition-colors hover:border-brand hover:bg-mint"
+                className="inline-flex h-7 items-center rounded-md border border-line bg-canvas px-2.5 text-[10px] font-medium text-ink transition-colors hover:border-brand hover:bg-mint disabled:opacity-50"
               >
                 {code}
               </button>
             ))}
           </div>
-          <p className="mt-3 text-[10px] leading-[14px] text-muted">
-            Click a code to insert it, or type it — e.g. ##COMPANY_NAME#. Same format as eFiling.
-          </p>
+          <p className="mt-3 text-[10px] leading-[14px] text-muted">Click a code to insert it where the cursor is, or type it — e.g. ##COMPANY_NAME#. Same format as eFiling.</p>
         </section>
 
         <section className="rounded-[14px] border border-line bg-white p-3.5">
           <div className="flex items-center justify-between">
             <h3 className="text-[12px] font-bold leading-4 text-ink">Live preview</h3>
-            <span className="inline-flex h-6 items-center rounded-full border border-line px-2.5 text-[10px] font-medium text-ink">
-              A4 front
+            <span className="inline-flex h-6 max-w-[60%] items-center truncate rounded-full border border-line px-2.5 text-[10px] font-medium text-ink" title={preview.recipient.companyName}>
+              {preview.recipient.companyName}
             </span>
           </div>
           <div className="mt-3 flex justify-center rounded-lg bg-canvas py-3">
-            <PrintedLetter width={300} />
+            <PrintedLetter letter={letter} width={340} />
           </div>
         </section>
       </div>
@@ -260,36 +336,25 @@ function Tool({
   label,
   onClick,
   children,
+  disabled,
 }: {
   icon?: IconDefinition;
   label: string;
   onClick: () => void;
   children?: ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       title={label}
       aria-label={label}
+      disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className="inline-flex size-8 items-center justify-center rounded-lg text-ink transition-colors hover:bg-white"
+      className="inline-flex size-8 items-center justify-center rounded-lg text-ink transition-colors hover:bg-white disabled:opacity-40"
     >
       {icon ? <Icon icon={icon} size={11} /> : children}
-    </button>
-  );
-}
-
-function SelectTool({ label }: { label: string }) {
-  return (
-    <button
-      type="button"
-      className="inline-flex h-8 items-center gap-2 rounded-lg border border-line bg-white px-2.5 text-[12px] font-medium text-ink hover:border-n400"
-    >
-      {label}
-      <span className="text-muted">
-        <Icon icon={faChevronDown} size={8} />
-      </span>
     </button>
   );
 }

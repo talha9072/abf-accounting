@@ -2,7 +2,18 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   faCircleInfo,
   faClock,
@@ -13,6 +24,7 @@ import {
   faMagnifyingGlass,
   faPlus,
   faPrint,
+  faSpinner,
   faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
@@ -23,16 +35,31 @@ import { Field, Input } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { templates, type TemplateSummary } from "@/lib/mock-data";
+import { createTemplateAction, duplicateTemplateAction } from "@/lib/templates/actions";
+import type { TemplateListItem, TemplateStatus } from "@/lib/templates/queries";
 import { cn } from "@/lib/cn";
 
-const STATUS_TONE: Record<TemplateSummary["status"], Tone> = { Active: "success", Draft: "neutral", Archived: "neutral" };
+const STATUS: Record<TemplateStatus, { tone: Tone; label: string }> = {
+  active: { tone: "success", label: "Active" },
+  draft: { tone: "neutral", label: "Draft" },
+  archived: { tone: "neutral", label: "Archived" },
+};
 
-/** Lets the content editor tell the workspace it has unsaved edits. */
-const DirtyContext = createContext<(dirty: boolean) => void>(() => {});
-export const useMarkDirty = () => useContext(DirtyContext);
+/* ------------------------------------------------------------------ */
+/* Editor context: tabs tell the workspace they have unsaved edits and */
+/* register what "Save changes" should do.                             */
+/* ------------------------------------------------------------------ */
 
-export function TemplateWorkspace({ template, children }: { template: TemplateSummary; children: ReactNode }) {
+type SaveFn = () => Promise<boolean>;
+type EditorCtx = { markDirty: (d: boolean) => void; registerSave: (fn: SaveFn | null) => void; saving: boolean };
+const EditorContext = createContext<EditorCtx>({ markDirty: () => {}, registerSave: () => {}, saving: false });
+export const useTemplateEditor = () => useContext(EditorContext);
+/** Back-compat alias used by older tab code. */
+export const useMarkDirty = () => useContext(EditorContext).markDirty;
+
+type Current = { id: string; name: string; status: TemplateStatus; isDefault: boolean; version: string };
+
+export function TemplateWorkspace({ list, template, children }: { list: TemplateListItem[]; template: Current; children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const toast = useToast();
@@ -40,29 +67,69 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
   const [q, setQ] = useState("");
   const [dirty, setDirty] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [hasSave, setHasSave] = useState(false);
+  const saveRef = useRef<SaveFn | null>(null);
+  const [busy, start] = useTransition();
   const base = `/letter-templates/${template.id}`;
 
-  /** Ask before leaving another template while there are unsaved edits. */
+  const registerSave = useCallback((fn: SaveFn | null) => {
+    saveRef.current = fn;
+    setHasSave(Boolean(fn));
+  }, []);
+
+  const save = useCallback(async () => {
+    if (!saveRef.current) return false;
+    setSaving(true);
+    try {
+      const ok = await saveRef.current();
+      if (ok) setDirty(false);
+      return ok;
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  // Warn before closing the tab with unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  /** Ask before leaving the editor (other template, or another tab) with unsaved edits. */
   const guard = (href: string) => (e: MouseEvent) => {
-    if (!dirty || href.startsWith(base)) return;
+    if (!dirty || href === pathname) return;
     e.preventDefault();
     setPendingHref(href);
     setModal("leave");
   };
-  const leave = (save: boolean) => {
-    if (save) toast({ message: `${template.name} saved` });
+  const leave = async (doSave: boolean) => {
+    if (doSave && !(await save())) {
+      setModal(null);
+      return;
+    }
     setDirty(false);
     setModal(null);
     if (pendingHref) router.push(pendingHref);
   };
 
-  const list = useMemo(() => templates.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase())), [q]);
+  const shown = useMemo(() => list.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase())), [list, q]);
   const tabs = [
     { label: "Content", href: base },
     { label: "Replace codes", href: `${base}/replace-codes` },
     { label: "Settings", href: `${base}/settings` },
     { label: "Version history", href: `${base}/versions` },
   ];
+  const meta = list.find((t) => t.id === template.id);
+
+  const duplicate = () =>
+    start(async () => {
+      const r = await duplicateTemplateAction(template.id);
+      toast({ message: r.message });
+      if (r.ok) router.push(`/letter-templates/${r.id}`);
+    });
 
   return (
     <>
@@ -71,11 +138,7 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
         description="Edit the letter that gets printed. Replace codes fill in each company’s name, address and details automatically."
         actions={
           <>
-            <Button
-              variant="secondary"
-              icon={faClone}
-              onClick={() => toast({ message: `Copy of ${template.name} created` })}
-            >
+            <Button variant="secondary" icon={busy ? faSpinner : faClone} onClick={duplicate} disabled={busy}>
               Duplicate
             </Button>
             <Button icon={faPlus} onClick={() => setModal("new")}>
@@ -90,7 +153,7 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
         <aside aria-label="Templates" className="flex flex-col gap-3 rounded-[14px] border border-line bg-white p-4 xl:sticky xl:top-[100px] xl:min-h-[calc(100vh-232px)]">
           <div className="flex items-center justify-between">
             <h2 className="text-[16px] font-bold leading-[22px] text-ink">Templates</h2>
-            <CountPill>{templates.length} total</CountPill>
+            <CountPill>{list.length} total</CountPill>
           </div>
           <label className="flex h-[38px] items-center gap-2 rounded-[9px] border border-line bg-canvas px-[11px] text-muted focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/15">
             <Icon icon={faMagnifyingGlass} size={11} />
@@ -103,7 +166,7 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
             />
           </label>
           <ul className="flex flex-col gap-3">
-            {list.map((t) => {
+            {shown.map((t) => {
               const active = t.id === template.id;
               return (
                 <li key={t.id}>
@@ -118,8 +181,8 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="text-[12px] font-bold leading-4 text-ink">{t.name}</span>
-                      <StatusBadge tone={STATUS_TONE[t.status]} size="sm" className={t.status === "Active" ? "bg-transparent" : ""}>
-                        {t.status}
+                      <StatusBadge tone={STATUS[t.status].tone} size="sm" className={t.status === "active" ? "bg-transparent" : ""}>
+                        {STATUS[t.status].label}
                       </StatusBadge>
                     </span>
                     <span className="text-[10px] leading-[14px] text-muted">{t.usage}</span>
@@ -133,12 +196,17 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
             })}
           </ul>
           <div className="mt-auto flex flex-col gap-3 pt-4">
-            <button type="button" className="inline-flex items-center gap-2 self-start text-[12px] font-medium text-ink hover:text-brand">
+            <a
+              href={`/print-doc/test/${template.id}?auto=1`}
+              target="_blank"
+              rel="noopener"
+              className="inline-flex items-center gap-2 self-start text-[12px] font-medium text-ink hover:text-brand"
+            >
               <span className="text-muted">
                 <Icon icon={faPrint} size={11} />
               </span>
               Print a test letter
-            </button>
+            </a>
             <p className="flex items-center gap-1.5 text-[10px] leading-[13px] text-muted">
               <Icon icon={faCircleInfo} size={9} />
               Archived templates stay available for past print runs.
@@ -152,28 +220,22 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
             <div className="flex flex-col gap-[3px]">
               <div className="flex items-center gap-2">
                 <h2 className="text-[18px] font-bold leading-6 text-ink">{template.name}</h2>
-                <StatusBadge tone={STATUS_TONE[template.status]} size="sm">
-                  {template.status}
+                <StatusBadge tone={STATUS[template.status].tone} size="sm">
+                  {STATUS[template.status].label}
                 </StatusBadge>
+                <span className="text-[11px] font-medium text-muted">{template.version}</span>
+                {dirty ? <span className="text-[11px] font-medium text-warning">· Unsaved changes</span> : null}
               </div>
               <p className="text-[10px] leading-[13px] text-muted">
-                {template.status === "Active" && template.usage.startsWith("Default")
-                  ? "Default letter · used for every print run unless you pick another"
-                  : template.usage}
+                {template.isDefault ? "Default letter · used for every print run unless you pick another" : meta?.usage}
               </p>
             </div>
             <div className="flex gap-2">
-              <ButtonLink variant="secondary" icon={faEye} href="/print/preview">
+              <ButtonLink variant="secondary" icon={faEye} href={`/print-doc/test/${template.id}`} target="_blank" rel="noopener">
                 Preview
               </ButtonLink>
-              <Button
-                icon={faFloppyDisk}
-                onClick={() => {
-                  setDirty(false);
-                  toast({ message: `${template.name} saved · used for the next print run` });
-                }}
-              >
-                Save changes
+              <Button icon={saving ? faSpinner : faFloppyDisk} onClick={() => void save()} disabled={!hasSave || saving || !dirty}>
+                {saving ? "Saving…" : "Save changes"}
               </Button>
             </div>
           </header>
@@ -184,6 +246,7 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
                 <Link
                   key={t.href}
                   href={t.href}
+                  onClick={guard(t.href)}
                   scroll={false}
                   aria-current={active ? "page" : undefined}
                   className={cn(
@@ -197,25 +260,53 @@ export function TemplateWorkspace({ template, children }: { template: TemplateSu
             })}
           </nav>
           <div className="p-[18px]">
-            <DirtyContext value={setDirty}>{children}</DirtyContext>
+            <EditorContext value={{ markDirty: setDirty, registerSave, saving }}>{children}</EditorContext>
           </div>
         </section>
       </div>
 
-      <NewTemplateModal open={modal === "new"} onClose={() => setModal(null)} from={template.name} />
-      <LeaveModal
+      <NewTemplateModal open={modal === "new"} onClose={() => setModal(null)} from={{ id: template.id, name: template.name }} />
+      <Modal
         open={modal === "leave"}
         onClose={() => setModal(null)}
-        onDiscard={() => leave(false)}
-        onSave={() => leave(true)}
-        name={template.name}
+        width={480}
+        icon={faTriangleExclamation}
+        iconTone="danger"
+        title="Leave without saving?"
+        subtitle={`You have unsaved changes to ${template.name}`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => void leave(false)}>
+              Discard changes
+            </Button>
+            <Button icon={saving ? faSpinner : faFloppyDisk} className="ml-auto" onClick={() => void leave(true)} disabled={saving}>
+              Save &amp; leave
+            </Button>
+          </>
+        }
       />
     </>
   );
 }
 
-function NewTemplateModal({ open, onClose, from }: { open: boolean; onClose: () => void; from: string }) {
+function NewTemplateModal({ open, onClose, from }: { open: boolean; onClose: () => void; from: { id: string; name: string } }) {
+  const router = useRouter();
+  const toast = useToast();
   const [mode, setMode] = useState<"copy" | "blank">("copy");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  const create = () =>
+    start(async () => {
+      const r = await createTemplateAction({ name, copyFrom: mode === "copy" ? from.id : null });
+      if (!r.ok) return setError(r.fieldErrors?.name?.[0] ?? r.message);
+      toast({ message: r.message });
+      onClose();
+      setName("");
+      router.push(`/letter-templates/${r.id}`);
+    });
+
   return (
     <Modal
       open={open}
@@ -223,20 +314,27 @@ function NewTemplateModal({ open, onClose, from }: { open: boolean; onClose: () 
       width={520}
       icon={faFile}
       title="New template"
-      subtitle="Start from the current default or a blank letter"
+      subtitle="Start from the current template or a blank letter"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button icon={faPlus} className="ml-auto" onClick={onClose}>
+          <Button icon={pending ? faSpinner : faPlus} className="ml-auto" onClick={create} disabled={pending}>
             Create template
           </Button>
         </>
       }
     >
-      <Field label="Template name" htmlFor="tpl-name">
-        <Input id="tpl-name" defaultValue="Welcome Letter v4" maxLength={120} autoFocus />
+      <Field label="Template name" htmlFor="tpl-name" error={error}>
+        <Input
+          id="tpl-name"
+          value={name}
+          onChange={(e) => (setName(e.target.value), setError(null))}
+          placeholder={`${from.name.replace(/v(\d+)$/, (_, n) => `v${Number(n) + 1}`)}`}
+          maxLength={120}
+          autoFocus
+        />
       </Field>
       <fieldset className="flex flex-col gap-4">
         <legend className="sr-only">Start from</legend>
@@ -244,53 +342,18 @@ function NewTemplateModal({ open, onClose, from }: { open: boolean; onClose: () 
           name="tpl-start"
           checked={mode === "copy"}
           onChange={() => setMode("copy")}
-          label={`Copy ${from}`}
-          description="Keeps the layout, replace codes and exclude footer"
+          label={`Copy ${from.name}`}
+          description="Keeps the letter text, greeting, offer and sign-off"
         />
         <Radio
           name="tpl-start"
           checked={mode === "blank"}
           onChange={() => setMode("blank")}
           label="Blank letter"
-          description="Exclude footer and address block are still added"
+          description="Letterhead, address block and exclude footer are still added"
         />
       </fieldset>
+      <p className="text-[11px] leading-[15px] text-muted">New templates start as a Draft — set them to Active in Settings to use them for printing.</p>
     </Modal>
-  );
-}
-
-function LeaveModal({
-  open,
-  onClose,
-  onDiscard,
-  onSave,
-  name,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onDiscard: () => void;
-  onSave: () => void;
-  name: string;
-}) {
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      width={480}
-      icon={faTriangleExclamation}
-      iconTone="danger"
-      title="Leave without saving?"
-      subtitle={`You have unsaved changes to ${name}`}
-      footer={
-        <>
-          <Button variant="secondary" onClick={onDiscard}>
-            Discard changes
-          </Button>
-          <Button icon={faFloppyDisk} className="ml-auto" onClick={onSave}>
-            Save &amp; leave
-          </Button>
-        </>
-      }
-    />
   );
 }
