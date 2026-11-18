@@ -1,9 +1,10 @@
-import { inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { getCurrentSession } from "@/lib/auth/dal";
 import { db } from "@/lib/db";
-import { companies } from "@/lib/db/schema";
+import { companies, printRunItems, printRuns } from "@/lib/db/schema";
 import { formatAddress, formatCompanyName, postingAddress, sicDescription } from "@/lib/companies/format";
 import { matchingCompanyNumbers, parseFeedFilters } from "@/lib/companies/queries";
+import { dateInTz, UK_TZ } from "@/lib/pull/dates";
 
 const STATE_LABEL: Record<string, string> = {
   not_reviewed: "Not reviewed",
@@ -28,8 +29,16 @@ export async function POST(req: Request) {
   if (!session) return new Response("Unauthorised", { status: 401 });
 
   // Same-origin form posts only.
+  // Compare with the Host the browser used (req.url is the internal address behind a proxy / in dev).
   const origin = req.headers.get("origin");
-  if (origin && origin !== new URL(req.url).origin) return new Response("Forbidden", { status: 403 });
+  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").split(",")[0].trim().toLowerCase();
+  if (origin) {
+    let originHost = "";
+    try {
+      originHost = new URL(origin).host.toLowerCase();
+    } catch {}
+    if (!host || originHost !== host) return new Response("Forbidden", { status: 403 });
+  }
 
   const form = await req.formData();
   const scope = form.get("scope") === "selected" ? "selected" : "filtered";
@@ -50,6 +59,19 @@ export async function POST(req: Request) {
   const rows = numbers.length
     ? await db.select().from(companies).where(inArray(companies.companyNumber, numbers)).orderBy(companies.incorporatedOn)
     : [];
+
+  // Printed date = the company's latest print run that wasn't cancelled (UK calendar day).
+  const printed = new Map<string, string>();
+  if (withStatus && rows.length) {
+    const at = sql`coalesce(${printRuns.printedAt}, ${printRuns.createdAt})`;
+    const runs = await db
+      .selectDistinctOn([printRunItems.companyId], { companyId: printRunItems.companyId, at: at.mapWith(printRuns.createdAt) })
+      .from(printRunItems)
+      .innerJoin(printRuns, eq(printRuns.id, printRunItems.printRunId))
+      .where(and(inArray(printRunItems.companyId, rows.map((r) => r.id)), ne(printRuns.status, "cancelled")))
+      .orderBy(printRunItems.companyId, desc(at));
+    for (const r of runs) printed.set(r.companyId, dateInTz(new Date(r.at), UK_TZ));
+  }
 
   const header = [
     "Company name",
@@ -75,7 +97,7 @@ export async function POST(req: Request) {
       addr.postcode ?? "",
       r.sicCodes[0] ?? "",
       r.sicCodes[0] ? sicDescription(r.sicCodes[0]) : "",
-      ...(withStatus ? [STATE_LABEL[r.letterState] ?? r.letterState, r.skipReason ?? "", ""] : []),
+      ...(withStatus ? [STATE_LABEL[r.letterState] ?? r.letterState, r.skipReason ?? "", printed.get(r.id) ?? ""] : []),
     ]
       .map(cell)
       .join(",");

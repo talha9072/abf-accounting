@@ -8,12 +8,12 @@ import { getCurrentSession } from "@/lib/auth/dal";
 import { buildLetterSnapshot, getBusiness, getPrintableTemplate } from "@/lib/letters/data";
 import { dateInTz, UK_TZ } from "@/lib/pull/dates";
 import { notify } from "@/lib/notifications/server";
+import { MAX_RUN_LETTERS as MAX_LETTERS } from "./limits";
 
-export type RunResult = { ok: true; runId: string; reference: string; letters: number } | { ok: false; message: string };
+export type RunResult = { ok: true; runId: string; reference: string; letters: number; template: string } | { ok: false; message: string };
 export type SimpleResult = { ok: true; count: number } | { ok: false; message: string };
 
 const uuid = z.string().uuid();
-const MAX_LETTERS = 500;
 
 async function auth() {
   return (await getCurrentSession())?.user ?? null;
@@ -114,7 +114,7 @@ export async function createRunAction(input: { templateId?: string | null }): Pr
           detail: `${reference} · letter ${i + 1} of ${batch.length} · ${tpl.name}`,
         })),
       );
-      return { runId: run.id, reference, letters: batch.length };
+      return { runId: run.id, reference, letters: batch.length, template: tpl.name };
     });
     return { ok: true, ...result };
   } catch (e) {

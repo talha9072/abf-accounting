@@ -6,6 +6,7 @@ import {
   faBuilding,
   faClockRotateLeft,
   faEnvelopeOpenText,
+  faGear,
   faPrint,
   type IconDefinition,
 } from "@fortawesome/free-solid-svg-icons";
@@ -28,6 +29,7 @@ export function Sidebar({ counts }: { counts: SidebarCounts }) {
     { href: "/print", label: "Print", icon: faPrint, count: counts.inRun ? fmt(counts.inRun) : undefined, title: "In today’s print run" },
     { href: "/letter-templates", label: "Letter Templates", icon: faEnvelopeOpenText },
     { href: "/history", label: "History", icon: faClockRotateLeft },
+    { href: "/settings", label: "Business settings", icon: faGear },
   ];
 
   return (

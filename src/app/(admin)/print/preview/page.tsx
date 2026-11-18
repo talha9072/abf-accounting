@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
-import { eq, asc } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { companies } from "@/lib/db/schema";
-import { buildLetterSnapshot, getBusiness, getPrintableTemplate, renderLetter } from "@/lib/letters/data";
-import { dateInTz, UK_TZ } from "@/lib/pull/dates";
+import { getOpenRuns, getQueueLetters, listRuns } from "@/lib/print/queries";
 import { PrintPreview } from "./print-preview";
 
 export const metadata: Metadata = { title: "Preview letters" };
@@ -12,25 +8,21 @@ const PREVIEW_MAX = 100;
 
 export default async function PrintPreviewPage({ searchParams }: PageProps<"/print/preview">) {
   const sp = await searchParams;
-  const tpl = await getPrintableTemplate(typeof sp.template === "string" ? sp.template : null);
-  const business = await getBusiness();
-  const today = dateInTz(new Date(), UK_TZ);
+  const requested = typeof sp.template === "string" ? sp.template : null;
+  const [{ template: tpl, letters, total }, openRuns, [latestRun]] = await Promise.all([getQueueLetters(requested, PREVIEW_MAX), getOpenRuns(), listRuns(1)]);
+  const openRun = openRuns[0];
 
-  const rows = await db
-    .select({
-      name: companies.name,
-      companyNumber: companies.companyNumber,
-      directorFirstName: companies.directorFirstName,
-      directorFullName: companies.directorFullName,
-      incorporatedOn: companies.incorporatedOn,
-      registeredOffice: companies.registeredOffice,
-      postingAddress: companies.postingAddress,
-    })
-    .from(companies)
-    .where(eq(companies.letterState, "added"))
-    .orderBy(asc(companies.incorporatedOn), asc(companies.companyNumber));
-
-  const letters = await Promise.all(rows.slice(0, PREVIEW_MAX).map((c) => renderLetter(buildLetterSnapshot(c, tpl, business, today), business)));
-
-  return <PrintPreview letters={letters} total={rows.length} template={{ id: tpl.id, name: tpl.name, version: tpl.version }} />;
+  return (
+    <PrintPreview
+      letters={letters}
+      total={total}
+      template={{ id: tpl.id, name: tpl.name, version: tpl.version }}
+      // Keep ?template= on links only when it picked a (non-default) template.
+      templateParam={requested === tpl.id ? tpl.id : null}
+      // ?confirm=1 — "Did all letters print?" for the newest run that's still waiting; ignored if there is none.
+      confirmRun={sp.confirm === "1" && openRun ? { id: openRun.id, reference: openRun.reference, letters: openRun.letters, template: openRun.template } : null}
+      openRun={Boolean(openRun)}
+      labelsRun={Boolean(latestRun)}
+    />
+  );
 }

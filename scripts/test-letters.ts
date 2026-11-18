@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { sanitizeTemplateHtml } from "../src/lib/letters/html";
 import { mergeCodes, mergeGreeting, type MergeValues } from "../src/lib/letters/merge";
+import { letterFooterLines } from "../src/lib/letters/footer";
 
 const s = sanitizeTemplateHtml;
 
@@ -20,6 +21,19 @@ assert.equal(s("<iframe src=//evil></iframe>"), "");
 assert.equal(s("<p>2 < 3 and <img src=x onerror=alert(1)"), "<p>2 &lt; 3 and &lt;img src=x onerror=alert(1)");
 // contentEditable <div>s become paragraphs; empty paragraphs vanish.
 assert.equal(s("<div>One</div><div><br></div><div>Two</div>"), "<p>One</p><p>Two</p>");
+// Strikethrough: Chromium's execCommand makes <strike>; <del> means the same. Both become <s>.
+assert.equal(s("<p>a <strike>b</strike> <del datetime=x>c</del> <s>d</s></p>"), "<p>a <s>b</s> <s>c</s> <s>d</s></p>");
+// Indent: only an exact indent-1…3 class survives on paragraphs — rebuilt, never copied.
+assert.equal(s('<div class="indent-2">x</div>'), '<p class="indent-2">x</p>');
+assert.equal(s('<p class="foo indent-1 bar" style="margin-left:40px">x</p>'), '<p class="indent-1">x</p>');
+assert.equal(s("<p class='indent-3'>x</p><p class=indent-1>y</p>"), '<p class="indent-3">x</p><p class="indent-1">y</p>');
+assert.equal(s('<p class="indent-4">x</p><p class="indent-1x">y</p><p data-class="indent-1">z</p>'), "<p>x</p><p>y</p><p>z</p>");
+assert.equal(s('<p class="indent-1" onclick="alert(1)">x</p>'), '<p class="indent-1">x</p>');
+assert.equal(s('<p class="indent-1&quot; onclick=&quot;alert(1)">x</p>'), "<p>x</p>");
+assert.equal(s('<strong class="indent-1">x</strong><blockquote class="indent-2">y</blockquote>'), "<strong>x</strong><blockquote>y</blockquote>");
+assert.equal(s('<p class="indent-2"><br></p>'), "");
+// The old execCommand("indent") markup loses its inline style (it's a plain quote, not arbitrary CSS).
+assert.equal(s('<blockquote style="margin: 0 0 0 40px; border: none; padding: 0px;">x</blockquote>'), "<blockquote>x</blockquote>");
 
 const values: MergeValues = {
   COMPANY_NAME: `Tom & Jerry <script>alert(1)</script> Ltd`,
@@ -47,4 +61,11 @@ assert.equal(mergeCodes("##LETTER_HEAD#<p>x ##NOT_A_CODE#</p>##LETTER_FOOTER#", 
 assert.equal(mergeGreeting("Dear ##DIRECTOR_FIRSTNAME#,", values), "To whom it may concern,");
 assert.equal(mergeGreeting("Dear ##DIRECTOR_FIRSTNAME#,", { ...values, DIRECTOR_FIRSTNAME: "Sarah" }), "Dear Sarah,");
 
-console.log("letters: sanitising + merging checks passed");
+// The exclude footer (printed letter + Settings tab share it) carries the contact details, reference and privacy line.
+const footer = letterFooterLines({ email: "support@x.com", phone: "+44 1", web: "x.com", registration: "Reg line" }, "ABF-1");
+assert.equal(footer.length, 2);
+assert.ok(footer[0].includes("Email support@x.com or call +44 1, quote ABF-1 and we’ll stop."));
+assert.ok(footer[0].includes("see x.com/privacy"));
+assert.equal(footer[1], "Reg line");
+
+console.log("letters: sanitising + merging + footer checks passed");

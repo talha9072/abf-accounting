@@ -15,11 +15,11 @@ export default async function HistoryPage({ searchParams }: PageProps<"/history"
   const offset = (page - 1) * PER;
 
   const [counts, sent, excluded, notSent, runs] = await Promise.all([
-    historyCounts(),
+    historyCounts(q),
     tab === "sent" ? historySent(q, PER, offset) : [],
     tab === "excluded" ? historyExcluded(q, PER, offset) : [],
     tab === "not-sent" ? historyNotSent(q, PER, offset) : [],
-    tab === "print-runs" ? listRuns(PER, offset) : [],
+    tab === "print-runs" ? listRuns(PER, offset, q) : [],
   ]);
 
   return <HistoryView tab={tab} q={q} page={page} per={PER} counts={counts} data={{ sent, excluded, notSent, runs }} />;

@@ -21,6 +21,11 @@ export type LetterState = "not_reviewed" | "address_issue" | "excluded" | "skipp
 
 /** More companies than this at one address in the look-back window ⇒ formation agent / virtual office. */
 export const SHARED_ADDRESS_THRESHOLD = Number(process.env.SHARED_ADDRESS_THRESHOLD ?? 5);
+/**
+ * Virtual offices give every client its own "Office 2334" / "Suite 61761", so the
+ * exact address never repeats. Many new companies at one postcode is the giveaway.
+ */
+export const SHARED_POSTCODE_THRESHOLD = Number(process.env.SHARED_POSTCODE_THRESHOLD ?? 8);
 
 const ALLOWED_TYPES = (process.env.ALLOWED_COMPANY_TYPES ?? "ltd,llp")
   .split(",")
@@ -49,6 +54,18 @@ export function normLine(line?: string | null) {
     .trim();
 }
 
+/**
+ * Tidies a postcode for printing: Companies House sometimes has stray spaces
+ * ("GU10 1 FJ") or none ("GU101FJ"). A valid UK postcode always ends in
+ * digit + 2 letters, so it becomes "GU10 1FJ". Anything else is left as typed.
+ */
+export function formatPostcode(pc?: string | null): string | null {
+  const raw = (pc ?? "").trim().toUpperCase();
+  if (!raw) return null;
+  const compact = raw.replace(/\s+/g, "");
+  return UK_POSTCODE.test(compact) ? `${compact.slice(0, -3)} ${compact.slice(-3)}` : raw.replace(/\s+/g, " ");
+}
+
 export function addressKey(a: Pick<Address, "line1" | "postcode">) {
   return `${normLine(a.line1)}|${normPostcode(a.postcode)}`;
 }
@@ -62,7 +79,7 @@ export function toAddress(ch: ChAddress | undefined): Address {
     line1: ch?.po_box ? `PO Box ${ch.po_box}${line1 ? `, ${line1}` : ""}` : line1,
     line2: ch?.address_line_2?.trim() || null,
     town: ch?.locality?.trim() || ch?.region?.trim() || "",
-    postcode: ch?.postal_code?.trim().toUpperCase() || null,
+    postcode: formatPostcode(ch?.postal_code),
     country: ch?.country?.trim() || null,
   };
 }
@@ -75,6 +92,8 @@ export type RuleContext = {
   ownOffice: { line1: string; postcode: string } | null;
   /** addressKey → number of companies at that address in the look-back window */
   sharedCounts: Map<string, number>;
+  /** compact postcode → number of companies there in the look-back window */
+  sharedPostcodes: Map<string, number>;
   excludedNumbers: Set<string>;
   excludedNames: Set<string>;
   printedNumbers: Set<string>;
@@ -93,7 +112,9 @@ export function evaluate(
       pc === normPostcode(ctx.ownOffice.postcode) &&
       normLine(c.address.line1).includes(normLine(ctx.ownOffice.line1))
     ),
-    not_shared_address: (ctx.sharedCounts.get(addressKey(c.address)) ?? 0) < SHARED_ADDRESS_THRESHOLD,
+    not_shared_address:
+      (ctx.sharedCounts.get(addressKey(c.address)) ?? 0) < SHARED_ADDRESS_THRESHOLD &&
+      (pc ? (ctx.sharedPostcodes.get(pc) ?? 0) : 0) < SHARED_POSTCODE_THRESHOLD,
     not_ch_default: pc !== CH_DEFAULT_POSTCODE,
     not_excluded: !ctx.excludedNumbers.has(c.companyNumber) && !ctx.excludedNames.has(normLine(c.name)),
     not_printed_before: !ctx.printedNumbers.has(c.companyNumber),
@@ -124,9 +145,11 @@ function titleCase(s: string) {
  * Companies House names look like "GRIFFITHS, Danielle Christina".
  */
 export function pickDirector(officers: ChOfficer[]): { firstName: string; fullName: string } | null {
+  // LLPs have members, not directors. Corporate officers ("corporate-…") are never picked.
+  const rank: Record<string, number> = { director: 0, "llp-designated-member": 1, "llp-member": 2 };
   const active = officers
-    .filter((o) => o.officer_role === "director" && !o.resigned_on && o.name)
-    .sort((a, b) => (a.appointed_on ?? "").localeCompare(b.appointed_on ?? ""));
+    .filter((o) => o.officer_role in rank && !o.resigned_on && o.name)
+    .sort((a, b) => rank[a.officer_role] - rank[b.officer_role] || (a.appointed_on ?? "").localeCompare(b.appointed_on ?? ""));
   const o = active[0];
   if (!o) return null;
   const [surnameRaw, givenRaw = ""] = o.name.split(",").map((s) => s.trim());

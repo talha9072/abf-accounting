@@ -66,7 +66,7 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
             ))}
           </dl>
         </Card>
-        <ActivityTimeline items={activity} limit={5} />
+        <ActivityTimeline items={activity} limit={5} viewAllHref={`/new-companies/${c.number}/activity`} />
       </div>
 
       <div className="flex flex-col gap-4">

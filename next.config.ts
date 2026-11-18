@@ -43,6 +43,9 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Dev only: lets the app be opened at http://127.0.0.1:3000 as well as localhost
+  // (handy when the browser has too many localhost cookies → HTTP 431).
+  allowedDevOrigins: ["127.0.0.1"],
   // Native argon2 binding must stay a server-side external.
   serverExternalPackages: ["@node-rs/argon2"],
   turbopack: {

@@ -34,11 +34,13 @@ import { cn } from "@/lib/cn";
 const COLUMNS = "28px 40px minmax(220px,520fr) 210px minmax(240px,380fr) 100px 110px 84px";
 
 type Props = {
-  queue: { rows: QueueRow[]; addressIssues: number; incorporatedLabel: string };
+  queue: { rows: QueueRow[]; total: number; addressIssues: number; incorporatedLabel: string };
   openRuns: RunSummary[];
   recentRuns: RunSummary[];
   templates: Array<{ id: string; name: string; greeting: string }>;
   templateId: string | null;
+  /** `?labels=1` — open "Print address labels" for the latest run. */
+  openLabels?: boolean;
 };
 
 const toFlow = (r: RunSummary): FlowRun & { printedDay: string } => ({
@@ -49,22 +51,30 @@ const toFlow = (r: RunSummary): FlowRun & { printedDay: string } => ({
   printedDay: r.printedDay,
 });
 
-export function PrintLetters({ queue, openRuns, recentRuns, templates, templateId }: Props) {
+export function PrintLetters({ queue, openRuns, recentRuns, templates, templateId, openLabels = false }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const flow = usePrintFlow();
+  // Labels go with the latest run: the newest one still waiting for confirmation, else the newest sent one.
+  const lastRun = openRuns[0] ?? recentRuns[0];
+  const flow = usePrintFlow(openLabels && lastRun ? { modal: "labels", run: toFlow(lastRun) } : null);
   const [busy, start] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reprintRun, setReprintRun] = useState<(FlowRun & { printedDay: string }) | null>(null);
 
   const rows = queue.rows;
+  /** Letters in this batch (one run prints at most MAX_RUN_LETTERS). */
   const n = rows.length;
+  const total = queue.total;
+  const waiting = total - n;
+  const noDirector = rows.filter((r) => r.noDirector).length;
+  const fmt = (v: number) => v.toLocaleString("en-GB");
   const template = templates.find((t) => t.id === templateId) ?? templates[0];
   const allSel = n > 0 && rows.every((r) => selected.has(r.number));
   const someSel = !allSel && rows.some((r) => selected.has(r.number));
-  const templateQs = template && template.id !== templates[0]?.id ? `?template=${template.id}` : "";
+  const templateParam = template && template.id !== templates[0]?.id ? template.id : null;
+  const templateQs = templateParam ? `?template=${templateParam}` : "";
 
   const remove = (numbers: string[]) =>
     start(async () => {
@@ -89,8 +99,6 @@ export function PrintLetters({ queue, openRuns, recentRuns, templates, templateI
     else sp.set("template", id);
     router.replace(sp.size ? `${pathname}?${sp}` : pathname, { scroll: false });
   };
-
-  const lastRun = openRuns[0] ?? recentRuns[0];
 
   return (
     <>
@@ -134,7 +142,7 @@ export function PrintLetters({ queue, openRuns, recentRuns, templates, templateI
       ))}
 
       <section aria-label="Print run summary" className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Kpi tone="brand" icon={faInbox} label="Selected for this print run" value={String(n)} sub={queue.incorporatedLabel} />
+        <Kpi tone="brand" icon={faInbox} label="Selected for this print run" value={fmt(total)} sub={queue.incorporatedLabel} />
         <div className="flex min-h-[120px] flex-col gap-[7px] rounded-[14px] border border-line bg-white p-4">
           <div className="flex items-center gap-[9px]">
             <span className="flex size-[30px] items-center justify-center rounded-lg bg-canvas text-ink">
@@ -156,14 +164,29 @@ export function PrintLetters({ queue, openRuns, recentRuns, templates, templateI
           )}
           <span className="truncate text-[10px] leading-[13px] text-muted">{template?.greeting}</span>
         </div>
-        <Kpi icon={faCheck} iconTone="mint" label="Letters" value={String(n)} sub="one per company" />
+        <Kpi icon={faCheck} iconTone="mint" label="Letters" value={fmt(n)} sub={waiting > 0 ? `this batch · ${fmt(waiting)} wait for the next` : "one per company"} />
         <Link href="/new-companies?view=address-issue&inc=all" className="contents">
           <Kpi icon={faBan} iconTone="coral" label="Need an address fix" value={String(queue.addressIssues)} sub="fix before printing →" hover />
         </Link>
       </section>
 
+      {waiting > 0 ? (
+        <p className="flex items-start gap-2.5 rounded-[10px] bg-mint px-4 py-3 text-[12px] leading-[17px] text-ink">
+          <Icon icon={faInbox} size={12} className="mt-0.5 text-brand" />
+          {fmt(total)} companies are in the print run. Letters print in batches of {fmt(n)} (oldest companies first) so a run stays a
+          manageable stack of paper — print and confirm this batch, then the next {fmt(Math.min(waiting, n))} appear here.
+        </p>
+      ) : null}
+      {noDirector > 0 ? (
+        <p className="flex items-start gap-2.5 rounded-[10px] bg-warning-subtle px-4 py-3 text-[12px] leading-[17px] text-ink">
+          <Icon icon={faTriangleExclamation} size={12} className="mt-0.5 text-warning" />
+          {fmt(noDirector)} {noDirector === 1 ? "letter has" : "letters have"} no director name, so {noDirector === 1 ? "it starts" : "they start"} “To whom it
+          may concern”. If a pull is still running, wait for it to finish — it is still looking up director names.
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <PrintSteps current={2} />
+        <PrintSteps current={2} template={templateParam} openRun={openRuns.length > 0} labelsRun={Boolean(lastRun)} />
       </div>
 
       {/* Toolbar (52px so the 36px buttons fit inside — Figma buttons overflowed the 48px bar) */}
@@ -174,17 +197,18 @@ export function PrintLetters({ queue, openRuns, recentRuns, templates, templateI
           indeterminate={someSel}
           onChange={() => setSelected(allSel || someSel ? new Set() : new Set(rows.map((r) => r.number)))}
         />
-        <span className="text-[12px] font-bold leading-4 text-ink">{selected.size ? `${selected.size} selected` : `${n} in this run`}</span>
+        <span className="text-[12px] font-bold leading-4 text-ink">{selected.size ? `${selected.size} selected` : waiting > 0 ? `${fmt(n)} in this batch` : `${fmt(n)} in this run`}</span>
         {selected.size ? (
           <Button size="sm" variant="secondary" icon={faXmark} disabled={busy} onClick={() => remove([...selected])}>
             Remove from run
           </Button>
-        ) : (
-          <>
-            <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">In this run</span>
-            <span className="inline-flex h-6 items-center rounded-full bg-mint px-2.5 text-[11px] font-medium text-ink">Address OK</span>
-          </>
-        )}
+        ) : n > 0 ? (
+          // Informational, not a filter: companies with an address issue never enter the run.
+          <span className="inline-flex items-center gap-1.5 text-[11px] leading-[15px] text-muted">
+            <Icon icon={faCheck} size={10} className="text-brand" />
+            All addresses OK
+          </span>
+        ) : null}
         <div className="ml-auto flex gap-2">
           <ButtonLink size="sm" variant="secondary" icon={faEye} href={`/print/preview${templateQs}`} aria-disabled={n === 0} className={n === 0 ? "pointer-events-none opacity-55" : ""}>
             Preview letters
@@ -215,7 +239,7 @@ export function PrintLetters({ queue, openRuns, recentRuns, templates, templateI
             </span>
           </>
         }
-        footer={<span className="text-[12px] text-muted">{n ? `${n} ${n === 1 ? "company" : "companies"} ready to print` : "The print run is empty"}</span>}
+        footer={<span className="text-[12px] text-muted">{n ? `${fmt(n)} ${n === 1 ? "company" : "companies"} ready to print${waiting > 0 ? ` · ${fmt(waiting)} more in the next batches` : ""}` : "The print run is empty"}</span>}
       >
         {n === 0 ? (
           <div className="flex flex-col items-center gap-1.5 px-4 py-12 text-center">

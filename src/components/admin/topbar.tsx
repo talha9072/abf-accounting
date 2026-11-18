@@ -19,7 +19,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/button";
-import { MenuItem, Popover } from "@/components/ui/popover";
+import { Popover } from "@/components/ui/popover";
 import { useNavDrawer } from "@/components/admin/nav-drawer";
 import { signOutAction } from "@/lib/auth/actions";
 import { getNotificationsAction, markAllReadAction } from "@/lib/notifications/actions";
@@ -129,6 +129,12 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
     onClose();
     router.push(`/new-companies/${number}`);
   };
+  /** Opt-outs without a company number (e.g. added by name) open the History → Excluded list, searched. */
+  const openOptOut = (o: Hit) => {
+    if (o.number) return open(o.number);
+    onClose();
+    router.push(`/history?tab=excluded${o.name ? `&q=${encodeURIComponent(o.name)}` : ""}`);
+  };
 
   return (
     <div
@@ -203,7 +209,7 @@ function SearchPanel({ onClose }: { onClose: () => void }) {
               <button
                 key={`${c.number}-${c.meta}`}
                 type="button"
-                onClick={() => c.number && open(c.number)}
+                onClick={() => openOptOut(c)}
                 className="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-canvas"
               >
                 <span className="mt-0.5 text-muted">
@@ -232,6 +238,15 @@ const NOTE_ICON: Record<string, { icon: typeof faBell; cls: string }> = {
   pull_failed: { icon: faTriangleExclamation, cls: "text-danger" },
   excluded: { icon: faBan, cls: "text-muted" },
   print_confirmed: { icon: faPrint, cls: "text-muted" },
+};
+
+/** Where each notification kind leads (kinds come from lib/pull/run-pull.ts, lib/companies/actions.ts, lib/print/actions.ts). */
+const NOTE_HREF: Record<string, string> = {
+  pull_complete: "/new-companies",
+  address_issues: "/new-companies?view=address-issue",
+  pull_failed: "/new-companies?modal=pull-failed",
+  excluded: "/history?tab=excluded",
+  print_confirmed: "/history?tab=print-runs",
 };
 
 function NotificationsMenu({ initial }: { initial: NotificationsData }) {
@@ -273,36 +288,54 @@ function NotificationsMenu({ initial }: { initial: NotificationsData }) {
         />
       )}
     >
-      <div className="flex flex-col gap-0.5">
-        <div className="flex items-center justify-between px-3 py-2">
-          <p className="text-[15px] font-bold leading-5 text-ink">Notifications</p>
-          {data.unread > 0 ? (
-            <button type="button" onClick={() => void markAll()} className="text-[12px] font-medium text-brand hover:underline">
-              Mark all read
-            </button>
-          ) : null}
-        </div>
-        {data.items.length === 0 ? (
-          <p className="px-3 pb-3 pt-1 text-[12px] text-muted">Nothing yet — pulls, print runs and exclusions show up here.</p>
-        ) : (
-          data.items.map((n) => {
-            const meta = NOTE_ICON[n.kind] ?? { icon: faBell, cls: "text-muted" };
-            return (
-              <div key={n.id} className={cn("flex gap-3 rounded-lg px-3 py-2.5", n.unread && "bg-mint")}>
-                <span className={cn("mt-[3px] flex w-3 justify-center", meta.cls)}>
-                  <Icon icon={meta.icon} size={12} />
-                </span>
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <p className="text-[13px] font-medium leading-[18px] text-ink">{n.title}</p>
-                  <p className="truncate text-[11px] leading-[15px] text-muted" title={n.detail}>
-                    {n.detail}
-                  </p>
+      {(close) => (
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center justify-between px-3 py-2">
+            <p className="text-[15px] font-bold leading-5 text-ink">Notifications</p>
+            {data.unread > 0 ? (
+              <button type="button" onClick={() => void markAll()} className="text-[12px] font-medium text-brand hover:underline">
+                Mark all read
+              </button>
+            ) : null}
+          </div>
+          {data.items.length === 0 ? (
+            <p className="px-3 pb-3 pt-1 text-[12px] text-muted">Nothing yet — pulls, print runs and exclusions show up here.</p>
+          ) : (
+            data.items.map((n) => {
+              const meta = NOTE_ICON[n.kind] ?? { icon: faBell, cls: "text-muted" };
+              const href = NOTE_HREF[n.kind];
+              const body = (
+                <>
+                  <span className={cn("mt-[3px] flex w-3 justify-center", meta.cls)}>
+                    <Icon icon={meta.icon} size={12} />
+                  </span>
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <p className="text-[13px] font-medium leading-[18px] text-ink">{n.title}</p>
+                    <p className="truncate text-[11px] leading-[15px] text-muted" title={n.detail}>
+                      {n.detail}
+                    </p>
+                  </div>
+                </>
+              );
+              const cls = cn("flex gap-3 rounded-lg px-3 py-2.5", n.unread && "bg-mint");
+              return href ? (
+                <Link
+                  key={n.id}
+                  href={href}
+                  onClick={close}
+                  className={cn(cls, "outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand/30", n.unread ? "hover:bg-mint/70" : "hover:bg-canvas")}
+                >
+                  {body}
+                </Link>
+              ) : (
+                <div key={n.id} className={cls}>
+                  {body}
                 </div>
-              </div>
-            );
-          })
-        )}
-      </div>
+              );
+            })
+          )}
+        </div>
+      )}
     </Popover>
   );
 }
@@ -343,9 +376,16 @@ function AccountMenu({ user }: { user: TopbarUser }) {
             </span>
             My account
           </Link>
-          <MenuItem icon={faCircleQuestion} onClick={close}>
+          <Link
+            href="/help"
+            onClick={close}
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-ink hover:bg-mint"
+          >
+            <span className="flex w-4 justify-center text-muted">
+              <Icon icon={faCircleQuestion} size={13} />
+            </span>
             Help &amp; how it works
-          </MenuItem>
+          </Link>
           <form action={signOutAction}>
             <button
               type="submit"

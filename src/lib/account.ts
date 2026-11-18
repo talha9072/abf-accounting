@@ -1,9 +1,10 @@
 import "server-only";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, count, desc, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { sessions, users } from "@/lib/db/schema";
+import { recoveryCodes, sessions, users } from "@/lib/db/schema";
 import { getCurrentSession } from "@/lib/auth/dal";
 import { redirect } from "next/navigation";
+import { mailConfigured } from "@/lib/mail";
 
 /** Narrow, client-safe view of the signed-in user's account. */
 export async function getMyAccount() {
@@ -31,8 +32,15 @@ export async function getMyAccount() {
     .orderBy(desc(sessions.lastSeenAt))
     .limit(10);
 
+  const [{ left }] = await db
+    .select({ left: count() })
+    .from(recoveryCodes)
+    .where(and(eq(recoveryCodes.userId, current.user.id), isNull(recoveryCodes.usedAt)));
+
   return {
     ...user,
+    recoveryCodesLeft: left,
+    mailReady: mailConfigured(),
     passwordChangedAt: user.passwordChangedAt.toISOString(),
     mobile: undefined, // never send the raw number to the browser
     mobileMasked: user.mobile ? maskPhone(user.mobile) : "",

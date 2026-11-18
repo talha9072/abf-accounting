@@ -50,6 +50,12 @@ export const users = pgTable(
     role: userRole("role").notNull().default("staff"),
     status: userStatus("status").notNull().default("active"),
     twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+    /** Authenticator-app (TOTP) secret, AES-256-GCM encrypted with AUTH_ENCRYPTION_KEY. */
+    totpSecret: text("totp_secret"),
+    /** Secret shown during set-up, until the first code confirms it. Encrypted too. */
+    totpPendingSecret: text("totp_pending_secret"),
+    /** Last 30-second step a code was accepted for — a code can't be used twice. */
+    totpLastStep: integer("totp_last_step"),
     emailOnPullFailure: boolean("email_on_pull_failure").notNull().default(true),
     /** Notifications created after this are "unread" for this user. */
     notificationsSeenAt: timestamp("notifications_seen_at", { withTimezone: true }),
@@ -99,6 +105,56 @@ export const passwordResetTokens = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("password_reset_token_hash_unique").on(t.tokenHash), index("password_reset_user_idx").on(t.userId)],
+);
+
+/** One-time recovery codes for two-step sign-in (stored hashed, 10 per user). */
+export const recoveryCodes = pgTable(
+  "recovery_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("recovery_codes_user_idx").on(t.userId)],
+);
+
+/**
+ * Password accepted, waiting for the authenticator code. The browser holds a
+ * random token in a short-lived cookie; only its hash is stored here.
+ */
+export const twoFactorChallenges = pgTable(
+  "two_factor_challenges",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(), // sha256(token) hex
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    remember: boolean("remember").notNull().default(false),
+    nextPath: varchar("next_path", { length: 512 }),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("two_factor_challenges_user_idx").on(t.userId)],
+);
+
+/** "Don't ask again on this computer" — skips the code for 30 days on one browser. */
+export const trustedDevices = pgTable(
+  "trusted_devices",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(), // sha256(token) hex
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    userAgent: varchar("user_agent", { length: 512 }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("trusted_devices_user_idx").on(t.userId)],
 );
 
 /** Every sign-in / reset attempt — used for IP + account rate limiting and audit. */

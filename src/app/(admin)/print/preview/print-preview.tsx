@@ -5,7 +5,7 @@ import { useState } from "react";
 import { faArrowLeft, faChevronLeft, faChevronRight, faDownload, faPrint, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { PageHeader } from "@/components/admin/page-header";
 import { FitLetter } from "@/components/admin/fit-letter";
-import { PrintSetupBanner, PrintSteps, usePrintFlow } from "@/components/admin/print-parts";
+import { PrintSetupBanner, PrintSteps, usePrintFlow, type FlowRun } from "@/components/admin/print-parts";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
@@ -15,15 +15,27 @@ export function PrintPreview({
   letters,
   total,
   template,
+  templateParam,
+  confirmRun,
+  openRun,
+  labelsRun,
 }: {
   letters: RenderedLetter[];
   total: number;
   template: { id: string; name: string; version: string };
+  /** Template id to keep on links (null = default template). */
+  templateParam: string | null;
+  /** `?confirm=1`: the run to ask "Did all letters print?" about. */
+  confirmRun: FlowRun | null;
+  openRun: boolean;
+  labelsRun: boolean;
 }) {
-  const flow = usePrintFlow();
+  const flow = usePrintFlow(confirmRun ? { modal: "confirm", run: confirmRun } : null);
   const [i, setI] = useState(0);
   const l = letters[i];
   const print = () => flow.printQueue(template.id);
+  /** Same letters as "Print", rendered from the live queue — nothing is recorded or marked printed. */
+  const downloadPdf = () => window.open(`/print-doc/queue/letters?${new URLSearchParams({ template: template.id, auto: "1" })}`, "_blank");
 
   const options: Array<[string, string]> = [
     ["Letters", `${total} · one per page`],
@@ -41,7 +53,7 @@ export function PrintPreview({
         description="Check each personalised letter before printing. The address block lines up with DL window envelopes."
         actions={
           <>
-            <ButtonLink variant="secondary" icon={faArrowLeft} href="/print">
+            <ButtonLink variant="secondary" icon={faArrowLeft} href={templateParam ? `/print?template=${templateParam}` : "/print"}>
               Back to selection
             </ButtonLink>
             <Button icon={flow.pending ? faSpinner : faPrint} onClick={print} disabled={total === 0 || flow.pending}>
@@ -51,7 +63,7 @@ export function PrintPreview({
         }
       />
       <PrintSetupBanner />
-      <PrintSteps current={3} />
+      <PrintSteps current={3} template={templateParam} openRun={openRun} labelsRun={labelsRun} />
 
       {total === 0 ? (
         <Card className="flex flex-col items-center gap-2 py-12 text-center">
@@ -115,10 +127,12 @@ export function PrintPreview({
               <Button icon={flow.pending ? faSpinner : faPrint} block onClick={print} disabled={flow.pending}>
                 Print {total} {total === 1 ? "letter" : "letters"}
               </Button>
-              <Button variant="secondary" icon={faDownload} block onClick={print} disabled={flow.pending} title="Choose “Save as PDF” in the print dialog">
+              <Button variant="secondary" icon={faDownload} block onClick={downloadPdf} title="Choose “Save as PDF” in the print dialog">
                 Download PDF
               </Button>
-              <p className="text-center text-[11px] leading-[15px] text-muted">For a PDF, choose “Save as PDF” as the printer.</p>
+              <p className="text-center text-[11px] leading-[15px] text-muted">
+                For a PDF, choose “Save as PDF” as the printer. Downloading doesn’t mark anything as printed.
+              </p>
             </div>
           </Card>
         </div>

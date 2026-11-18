@@ -3,11 +3,13 @@
  *   npx tsx scripts/test-eligibility.ts
  */
 import assert from "node:assert/strict";
-import { addressKey, evaluate, pickDirector, toAddress, type RuleContext } from "../src/lib/pull/eligibility";
+import { addressKey, evaluate, formatPostcode, pickDirector, toAddress, type RuleContext } from "../src/lib/pull/eligibility";
 
 const ctx: RuleContext = {
   ownOffice: { line1: "18 Thricknells Close", postcode: "LU3 3RP" },
   sharedCounts: new Map([[addressKey({ line1: "71-75 Shelton Street", postcode: "WC2H 9JQ" }), 203]]),
+  // Virtual office: every company gets its own "Office NNNN", only the postcode repeats.
+  sharedPostcodes: new Map([["WV60SR", 15]]),
   excludedNumbers: new Set(["11111111"]),
   excludedNames: new Set(["NORTH & CO LTD"]),
   printedNumbers: new Set(["22222222"]),
@@ -23,6 +25,9 @@ r = evaluate({ ...base, companyType: "plc", address: good }, ctx);
 assert.deepEqual([r.state, r.skipReason], ["skipped", "company_type"]);
 
 r = evaluate({ ...base, address: toAddress({ address_line_1: "71-75, Shelton Street", locality: "London", postal_code: "wc2h 9jq" }) }, ctx);
+assert.deepEqual([r.state, r.skipReason], ["skipped", "not_shared_address"]);
+
+r = evaluate({ ...base, address: toAddress({ address_line_1: "Office 2334 85 Dunstall Hill", locality: "Wolverhampton", postal_code: "WV60SR" }) }, ctx);
 assert.deepEqual([r.state, r.skipReason], ["skipped", "not_shared_address"]);
 
 r = evaluate({ ...base, address: toAddress({ address_line_1: "18 Thricknells Close", locality: "Luton", postal_code: "LU3 3RP" }) }, ctx);
@@ -55,5 +60,30 @@ assert.deepEqual(
   { firstName: "Sarah-Jane", fullName: "Sarah-Jane McDonald" },
 );
 assert.equal(pickDirector([{ name: "ACME DIRECTORS LTD", officer_role: "corporate-director" }]), null);
+// Postcodes from Companies House with odd spacing are tidied, so the address isn't flagged.
+assert.equal(formatPostcode("GU10 1 FJ"), "GU10 1FJ");
+assert.equal(formatPostcode("gu101fj"), "GU10 1FJ");
+assert.equal(formatPostcode(" EH2  2QA "), "EH2 2QA");
+assert.equal(formatPostcode(""), null);
+assert.equal(formatPostcode("NOT A CODE"), "NOT A CODE");
+assert.equal(toAddress({ address_line_1: "42 Yalden Gardens", locality: "Farnham", postal_code: "GU10 1 FJ" }).postcode, "GU10 1FJ");
+
+// LLPs: members instead of directors; designated members first, corporate members never.
+assert.deepEqual(
+  pickDirector([
+    { name: "HOLDCO LLP", officer_role: "corporate-llp-designated-member", appointed_on: "2026-11-01" },
+    { name: "KHAN, Ayesha", officer_role: "llp-member", appointed_on: "2026-11-01" },
+    { name: "PATEL, Ravi Kumar", officer_role: "llp-designated-member", appointed_on: "2026-11-02" },
+  ]),
+  { firstName: "Ravi", fullName: "Ravi Patel" },
+);
+// A real director still wins over an LLP role.
+assert.equal(
+  pickDirector([
+    { name: "KHAN, Ayesha", officer_role: "llp-designated-member", appointed_on: "2026-11-01" },
+    { name: "JONES, Tom", officer_role: "director", appointed_on: "2026-11-05" },
+  ])?.firstName,
+  "Tom",
+);
 
 console.log("eligibility + director parsing: all checks passed");

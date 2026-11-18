@@ -6,7 +6,7 @@ import { faRightToBracket } from "@fortawesome/free-solid-svg-icons";
 import { signInAction } from "@/lib/auth/actions";
 import { AuthField, FormMessage, PasswordField, SubmitButton } from "../_components/auth-ui";
 
-export function SignInForm({ next, notice }: { next?: string; notice?: string }) {
+export function SignInForm({ next, notice, registrationOpen = true }: { next?: string; notice?: string; registrationOpen?: boolean }) {
   const [state, action] = useActionState(signInAction, null);
 
   return (
@@ -48,12 +48,14 @@ export function SignInForm({ next, notice }: { next?: string; notice?: string })
         Sign in
       </SubmitButton>
 
-      <p className="text-center text-[13px] leading-[18px] text-muted">
-        New to ABF New Companies?{" "}
-        <Link href="/register" className="font-medium text-brand hover:underline">
-          Create an account
-        </Link>
-      </p>
+      {registrationOpen ? (
+        <p className="text-center text-[13px] leading-[18px] text-muted">
+          New to ABF New Companies?{" "}
+          <Link href="/register" className="font-medium text-brand hover:underline">
+            Create an account
+          </Link>
+        </p>
+      ) : null}
     </form>
   );
 }

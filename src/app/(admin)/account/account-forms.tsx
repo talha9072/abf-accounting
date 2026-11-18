@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/toast";
 import { changePasswordAction, signOutOtherDevicesAction, type FormState } from "@/lib/auth/actions";
 import { saveDetailsAction, saveEmailPrefsAction } from "@/lib/account-actions";
 import type { getMyAccount } from "@/lib/account";
+import { TwoStepRow } from "./two-step";
 
 type Account = Awaited<ReturnType<typeof getMyAccount>>;
 
@@ -105,7 +106,7 @@ export function AccountForms({ account }: { account: Account }) {
             <Field
               label="Mobile (optional)"
               htmlFor="acc-mobile"
-              hint={account.mobileMasked ? "Hidden for privacy — type a new number to replace it, or clear it" : "Only used for sign-in codes"}
+              hint={account.mobileMasked ? "Hidden for privacy — type a new number to replace it, or clear it" : "Only your admins can see it"}
               error={detailErrors.mobile}
             >
               <Input
@@ -133,9 +134,7 @@ export function AccountForms({ account }: { account: Account }) {
               Change password
             </Button>
           </Row>
-          <Row title="Two-step sign-in" sub="Coming soon — codes from an authenticator app when signing in on a new computer">
-            <Toggle label="Two-step sign-in (coming soon)" checked={account.twoFactorEnabled} disabled readOnly className="cursor-not-allowed opacity-50" />
-          </Row>
+          <TwoStepRow enabled={account.twoFactorEnabled} codesLeft={account.recoveryCodesLeft} />
           <Row title="Signed-in devices" sub={devicesLine}>
             <form action={signOutOthers}>
               <SignOutOthersButton disabled={others.length === 0} />
@@ -159,6 +158,11 @@ export function AccountForms({ account }: { account: Account }) {
         <Row title="Email me if the morning pull fails" sub="So letters aren’t delayed">
           <Toggle label="Email me if the morning pull fails" checked={pullEmail} onChange={(e) => setPullEmail(e.target.checked)} />
         </Row>
+        {!account.mailReady ? (
+          <p className="rounded-[10px] bg-warning-subtle px-3.5 py-3 text-[12px] leading-[17px] text-ink">
+            Email sending isn’t set up on this server yet (SMTP settings), so no emails go out. The in-app notification still appears.
+          </p>
+        ) : null}
         <Button type="submit" icon={savingPrefs ? faSpinner : faCheck} disabled={savingPrefs} className="self-end">
           {savingPrefs ? "Saving…" : "Save preferences"}
         </Button>

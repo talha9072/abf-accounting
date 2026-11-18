@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { faBoxArchive, faCheck, faLock, faSpinner } from "@fortawesome/free-solid-svg-icons";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "@/components/ui/controls";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Icon } from "@/components/ui/icon";
 import { useToast } from "@/components/ui/toast";
 import { archiveTemplateAction, saveSettingsAction } from "@/lib/templates/actions";
@@ -24,7 +24,16 @@ type Values = {
   cta: string;
 };
 
-export function TemplateSettingsForm({ template }: { template: Values }) {
+export function TemplateSettingsForm({
+  template,
+  footer,
+  referenceExample,
+}: {
+  template: Values;
+  /** The printed footer lines (see lib/letters/footer.ts), with ##REFERENCE# for the per-company reference. */
+  footer: string[];
+  referenceExample: string;
+}) {
   const router = useRouter();
   const toast = useToast();
   const { markDirty, registerSave, saving } = useTemplateEditor();
@@ -138,15 +147,14 @@ export function TemplateSettingsForm({ template }: { template: Values }) {
         </Field>
       </div>
 
-      <Field label="Exclude footer" htmlFor="ts-footer" hint="Set up for you by the developer. Always printed.">
+      <Field
+        label="Exclude footer"
+        htmlFor="ts-footer"
+        hint={`Set up for you by the developer. Always printed, exactly as shown — ##REFERENCE# becomes each company’s reference, e.g. ${referenceExample}.`}
+      >
         <div className="relative">
-          <Input
-            id="ts-footer"
-            readOnly
-            className="pr-10"
-            defaultValue="Don’t want letters from us? Email ##BRAND_SUPPORT_EMAIL# or call ##BRAND_SUPPORT_TELEPHONE#, quote your reference and we’ll stop."
-          />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-muted">
+          <Textarea id="ts-footer" readOnly rows={4} className="min-h-0 resize-none pr-10" value={footer.join("\n")} />
+          <span className="absolute right-4 top-4 text-muted">
             <Icon icon={faLock} size={11} />
           </span>
         </div>

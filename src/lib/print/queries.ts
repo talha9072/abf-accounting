@@ -1,10 +1,12 @@
 import "server-only";
-import { and, asc, count, desc, eq, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, exclusions, printRunItems, printRuns, users, type LetterSnapshot } from "@/lib/db/schema";
 import { cache } from "react";
 import { formatAddress, formatCompanyName, formatDate, postingAddress } from "@/lib/companies/format";
-import { dateInTz, formatSaTime, SCHEDULE_TZ } from "@/lib/pull/dates";
+import { buildLetterSnapshot, getBusiness, getPrintableTemplate, renderLetter } from "@/lib/letters/data";
+import { dateInTz, formatSaTime, SCHEDULE_TZ, UK_TZ } from "@/lib/pull/dates";
+import { MAX_RUN_LETTERS } from "./limits";
 
 const who = (first: string | null, last: string | null) => (first ? `${first} ${last ?? ""}`.trim() : "—");
 
@@ -43,9 +45,12 @@ export async function getPrintQueue() {
     .from(companies)
     .where(eq(companies.letterState, "added"))
     .orderBy(asc(companies.incorporatedOn), asc(companies.companyNumber))
-    .limit(1000);
+    .limit(MAX_RUN_LETTERS);
 
-  const [issues] = await db.select({ n: count() }).from(companies).where(eq(companies.letterState, "address_issue"));
+  const [[issues], [all]] = await Promise.all([
+    db.select({ n: count() }).from(companies).where(eq(companies.letterState, "address_issue")),
+    db.select({ n: count() }).from(companies).where(eq(companies.letterState, "added")),
+  ]);
   const incorporated = [...new Set(rows.map((r) => r.incorporatedOn))];
 
   return {
@@ -60,6 +65,8 @@ export async function getPrintQueue() {
       }),
     ),
     addressIssues: issues?.n ?? 0,
+    /** Everyone in the print run; `rows` is the next batch (at most MAX_RUN_LETTERS). */
+    total: all?.n ?? 0,
     incorporatedLabel:
       incorporated.length === 0
         ? "—"
@@ -67,6 +74,32 @@ export async function getPrintQueue() {
           ? `incorporated ${formatDate(incorporated[0])}`
           : `incorporated ${formatDate(incorporated[0])} – ${formatDate(incorporated[incorporated.length - 1])}`,
   };
+}
+
+/**
+ * The live print queue merged with a template and dated today — what
+ * "Print N letters" would freeze, but nothing is recorded. Used by the
+ * preview and by the non-committing "Download PDF" document.
+ */
+export async function getQueueLetters(templateId: string | null, limit = MAX_RUN_LETTERS) {
+  const [template, business] = await Promise.all([getPrintableTemplate(templateId), getBusiness()]);
+  const today = dateInTz(new Date(), UK_TZ);
+  const rows = await db
+    .select({
+      name: companies.name,
+      companyNumber: companies.companyNumber,
+      directorFirstName: companies.directorFirstName,
+      directorFullName: companies.directorFullName,
+      incorporatedOn: companies.incorporatedOn,
+      registeredOffice: companies.registeredOffice,
+      postingAddress: companies.postingAddress,
+    })
+    .from(companies)
+    .where(eq(companies.letterState, "added"))
+    .orderBy(asc(companies.incorporatedOn), asc(companies.companyNumber))
+    .limit(MAX_RUN_LETTERS);
+  const letters = await Promise.all(rows.slice(0, limit).map((c) => renderLetter(buildLetterSnapshot(c, template, business, today), business)));
+  return { template, letters, total: rows.length };
 }
 
 /* ------------------------------------------------------------------ */
@@ -136,12 +169,27 @@ export async function getOpenRuns() {
   return rows.map(toRunSummary);
 }
 
-export async function listRuns(limit = 50, offset = 0) {
+/** `%term%` for ILIKE, with the user's own % _ \ escaped. */
+const contains = (q: string) => `%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+const numberPrefix = (q: string) => `${q.replace(/\s+/g, "").replace(/[%_\\]/g, (c) => `\\${c}`).toUpperCase()}%`;
+
+/** Runs matching a reference (PR-0811-01), template name, or a company name / number inside the run. */
+function runSearch(q: string) {
+  if (!q) return undefined;
+  const inRun = db
+    .select({ one: sql`1` })
+    .from(printRunItems)
+    .innerJoin(companies, eq(printRunItems.companyId, companies.id))
+    .where(and(eq(printRunItems.printRunId, printRuns.id), or(ilike(companies.name, contains(q)), ilike(companies.companyNumber, numberPrefix(q)))));
+  return or(ilike(printRuns.reference, contains(q)), ilike(printRuns.templateName, contains(q)), exists(inRun));
+}
+
+export async function listRuns(limit = 50, offset = 0, q = "") {
   const rows = await db
     .select(runSelect)
     .from(printRuns)
     .leftJoin(users, eq(printRuns.printedBy, users.id))
-    .where(sql`${printRuns.status} <> 'cancelled'`)
+    .where(and(sql`${printRuns.status} <> 'cancelled'`, runSearch(q)))
     .orderBy(desc(printRuns.printedAt))
     .limit(limit)
     .offset(offset);
@@ -174,10 +222,20 @@ export type RunDetail = NonNullable<Awaited<ReturnType<typeof getRun>>>;
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
-export async function historyCounts() {
-  const states = await db.select({ s: companies.letterState, n: count() }).from(companies).where(isNotNull(companies.eligibility)).groupBy(companies.letterState);
+/** Tab counters — while searching they count only what matches, like the tables. */
+export async function historyCounts(q = "") {
+  const [states, [runs]] = await Promise.all([
+    db
+      .select({ s: companies.letterState, n: count() })
+      .from(companies)
+      .where(and(isNotNull(companies.eligibility), search(q)))
+      .groupBy(companies.letterState),
+    db
+      .select({ n: count() })
+      .from(printRuns)
+      .where(and(sql`${printRuns.status} <> 'cancelled'`, runSearch(q))),
+  ]);
   const get = (...s: string[]) => states.filter((x) => s.includes(x.s)).reduce((t, x) => t + x.n, 0);
-  const [runs] = await db.select({ n: count() }).from(printRuns).where(sql`${printRuns.status} <> 'cancelled'`);
   return {
     sent: get("posted", "printed"),
     excluded: get("excluded"),
@@ -188,8 +246,7 @@ export async function historyCounts() {
 
 function search(q: string) {
   if (!q) return undefined;
-  const term = q.replace(/[%_\\]/g, (c) => `\\${c}`);
-  return or(ilike(companies.name, `%${term}%`), ilike(companies.companyNumber, `${q.replace(/\s+/g, "").toUpperCase()}%`));
+  return or(ilike(companies.name, contains(q)), ilike(companies.companyNumber, numberPrefix(q)));
 }
 
 export async function historySent(q: string, limit = 50, offset = 0) {
@@ -201,6 +258,7 @@ export async function historySent(q: string, limit = 50, offset = 0) {
       director: companies.directorFullName,
       address: printRunItems.addressSnapshot,
       runId: printRuns.id,
+      position: printRunItems.position,
       reference: printRuns.reference,
       printedAt: printRuns.printedAt,
       first: users.firstName,
@@ -221,6 +279,7 @@ export async function historySent(q: string, limit = 50, offset = 0) {
     address: formatAddress(r.address),
     sentOn: r.printedAt ? saDay(r.printedAt) : "—",
     runId: r.runId,
+    position: r.position,
     printRun: r.reference,
     printedBy: who(r.first, r.last),
     confirmed: r.state === "posted",
@@ -228,7 +287,6 @@ export async function historySent(q: string, limit = 50, offset = 0) {
 }
 
 export async function historyExcluded(q: string, limit = 50, offset = 0) {
-  const term = q ? q.replace(/[%_\\]/g, (c) => `\\${c}`) : "";
   const rows = await db
     .select({
       number: exclusions.companyNumber,
@@ -240,7 +298,7 @@ export async function historyExcluded(q: string, limit = 50, offset = 0) {
     })
     .from(exclusions)
     .leftJoin(users, eq(exclusions.createdBy, users.id))
-    .where(q ? or(ilike(exclusions.companyName, `%${term}%`), ilike(exclusions.companyNumber, `${q.toUpperCase()}%`)) : undefined)
+    .where(q ? or(ilike(exclusions.companyName, contains(q)), ilike(exclusions.companyNumber, numberPrefix(q))) : undefined)
     .orderBy(desc(exclusions.createdAt))
     .limit(limit)
     .offset(offset);

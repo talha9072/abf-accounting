@@ -74,6 +74,7 @@ export default async function CompanyLayout({ children, params }: LayoutProps<"/
               number={c.number}
               name={c.name}
               state={c.state}
+              skipReason={c.skipReason}
               fix={{
                 number: c.number,
                 name: c.name,

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState, useTransition, type FormEvent } from "react";
 import {
   faBan,
   faCheck,
@@ -11,12 +12,15 @@ import {
   faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/controls";
-import { Field, Input, Select } from "@/components/ui/field";
+import { Checkbox, Radio } from "@/components/ui/controls";
+import { Field, Input } from "@/components/ui/field";
 import { Modal, Note } from "@/components/ui/modal";
-import { fixPostingAddressAction, skipCompanyAction } from "@/lib/companies/actions";
+import { fixPostingAddressAction, skipCompanyAction, unskipCompanyAction } from "@/lib/companies/actions";
 
 type ModalBase = { open: boolean; onClose: () => void };
+
+/** What a modal hands back to its page to show as a toast (same shape as useToast). */
+export type SavedToast = { message: string; actionLabel?: string; onAction?: () => void };
 
 /* Export companies ---------------------------------------------------- */
 
@@ -64,11 +68,9 @@ export function ExportModal({
             labelClassName="font-medium"
           />
         </div>
-        <Field label="Format" htmlFor="export-format">
-          <Select id="export-format" name="format" defaultValue="csv">
-            <option value="csv">CSV (opens in Excel)</option>
-          </Select>
-        </Field>
+        <p className="text-[12px] leading-4 text-muted">
+          Format: <span className="font-medium text-ink">CSV</span> (opens in Excel)
+        </p>
         <Checkbox
           label="Include letter status and printed date"
           checked={withStatus}
@@ -88,6 +90,94 @@ export function ExportModal({
   );
 }
 
+/* Exclude (with a reason) --------------------------------------------- */
+
+export const EXCLUDE_REASONS = ["Asked not to be contacted", "Already a client", "Not a fit", "Other"] as const;
+
+/**
+ * Asks why before excluding — the reason is saved on the do-not-contact list
+ * (History → Excluded, company Overview). One click + Enter is enough.
+ */
+export function ExcludeModal({
+  open,
+  onClose,
+  what,
+  onConfirm,
+}: ModalBase & { /** "Acme Ltd" or "12 companies" */ what: string; onConfirm: (reason: string) => void }) {
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      width={480}
+      icon={faBan}
+      iconTone="danger"
+      title={`Exclude ${what}?`}
+      subtitle="They won’t get a letter, now or in future pulls"
+    >
+      <ExcludeForm
+        onCancel={onClose}
+        onConfirm={(reason) => {
+          onClose();
+          onConfirm(reason);
+        }}
+      />
+    </Modal>
+  );
+}
+
+/** Rendered only while the modal is open, so every open starts fresh. */
+function ExcludeForm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: (reason: string) => void }) {
+  const [choice, setChoice] = useState<(typeof EXCLUDE_REASONS)[number]>(EXCLUDE_REASONS[0]);
+  const [details, setDetails] = useState("");
+  const detailsRef = useRef<HTMLInputElement>(null);
+
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const extra = details.trim();
+    onConfirm(choice === "Other" ? extra || "Other" : extra ? `${choice} — ${extra}` : choice);
+  };
+
+  return (
+    <form className="flex flex-col gap-[18px]" onSubmit={submit}>
+      <fieldset className="flex flex-col gap-3">
+        <legend className="mb-2.5 text-[12px] font-medium leading-4 text-ink">Reason</legend>
+        {EXCLUDE_REASONS.map((r, i) => (
+          <Radio
+            key={r}
+            name="exclude-reason"
+            value={r}
+            label={r}
+            checked={choice === r}
+            onChange={() => {
+              setChoice(r);
+              if (r === "Other") detailsRef.current?.focus();
+            }}
+            autoFocus={i === 0}
+          />
+        ))}
+      </fieldset>
+      <Field label={choice === "Other" ? "What happened? (optional)" : "Details (optional)"} htmlFor="exclude-details">
+        <Input
+          ref={detailsRef}
+          id="exclude-details"
+          value={details}
+          onChange={(e) => setDetails(e.target.value)}
+          maxLength={200}
+          placeholder={choice === "Other" ? "e.g. Company is dissolving" : "e.g. Phoned on 12 Nov"}
+        />
+      </Field>
+      <div className="flex flex-wrap justify-end gap-3 pt-1.5">
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="danger" icon={faBan}>
+          Exclude
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 /* Fix posting address ------------------------------------------------- */
 
 export type FixAddressTarget = {
@@ -102,35 +192,31 @@ export type FixAddressTarget = {
   postcode: string;
 };
 
+/**
+ * The fixed address is stored on the company (`posting_address`) and used for its letter and
+ * address label. Each company only ever gets one letter, so there's no "just this once" option.
+ */
 export function FixAddressModal({
   open,
   onClose,
   target,
   onSaved,
-}: ModalBase & { target?: FixAddressTarget | null; onSaved?: (message: string) => void }) {
+}: ModalBase & { target: FixAddressTarget | null; onSaved?: (toast: SavedToast) => void }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<Record<string, string[] | undefined>>({});
   const [message, setMessage] = useState<string | null>(null);
 
-  // Design-only fallback (Print page still uses sample data).
-  const t: FixAddressTarget = target ?? {
-    number: "17840516",
-    name: "Cedar Lane Analytics Ltd",
-    registeredText: "4 Rose St, Edinburgh — postcode missing",
-    line1: "4 Rose Street",
-    line2: "Flat 2/1",
-    town: "Edinburgh",
-    postcode: "",
-  };
+  if (!target) return null;
+  const t = target;
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!target) return onClose();
     const fd = new FormData(e.currentTarget);
     setMessage(null);
     startTransition(async () => {
       const r = await fixPostingAddressAction({
-        number: target.number,
+        number: t.number,
         line1: String(fd.get("line1") ?? ""),
         line2: String(fd.get("line2") ?? ""),
         town: String(fd.get("town") ?? ""),
@@ -138,7 +224,7 @@ export function FixAddressModal({
       });
       if (r.ok) {
         setErrors({});
-        onSaved?.(`Posting address saved for ${target.name}`);
+        onSaved?.({ message: `Posting address saved for ${t.name}` });
         onClose();
       } else {
         setErrors(r.fieldErrors ?? {});
@@ -148,13 +234,17 @@ export function FixAddressModal({
   };
 
   const skip = () => {
-    if (!target) return onClose();
+    setMessage(null);
     startTransition(async () => {
-      const r = await skipCompanyAction(target.number);
-      if (r.ok) {
-        onSaved?.(`${target.name} skipped — it won’t get a letter`);
-        onClose();
-      } else setMessage(r.message);
+      const r = await skipCompanyAction(t.number);
+      if (!r.ok) return setMessage(r.message);
+      if (!r.count) return setMessage("This company can’t be skipped — it’s already printed, excluded or skipped.");
+      onSaved?.({
+        message: `${t.name} skipped — it won’t get a letter`,
+        actionLabel: "Undo",
+        onAction: () => void unskipCompanyAction(t.number, r.wasInRun).then(() => router.refresh()),
+      });
+      onClose();
     });
   };
 
@@ -180,7 +270,7 @@ export function FixAddressModal({
             <Input id="postcode" name="postcode" defaultValue={t.postcode} autoComplete="postal-code" className="uppercase" maxLength={10} required />
           </Field>
         </div>
-        <Checkbox label="Use this address for future letters to this company" defaultChecked labelClassName="font-medium" />
+        <p className="text-[11px] leading-[15px] text-muted">Saved on this company and used for its letter and address label.</p>
         <div className="flex flex-wrap justify-end gap-3 pt-1.5">
           <Button variant="secondary" icon={faBan} onClick={skip} disabled={pending}>
             Skip this company

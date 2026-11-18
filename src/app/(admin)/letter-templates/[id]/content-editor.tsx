@@ -27,7 +27,7 @@ import { Icon } from "@/components/ui/icon";
 import { Note } from "@/components/ui/modal";
 import { Popover } from "@/components/ui/popover";
 import { useToast } from "@/components/ui/toast";
-import { sanitizeTemplateHtml } from "@/lib/letters/html";
+import { MAX_INDENT, sanitizeTemplateHtml } from "@/lib/letters/html";
 import { mergeCodes, mergeGreeting } from "@/lib/letters/merge";
 import type { RenderedLetter } from "@/lib/letters/data";
 import { saveContentAction } from "@/lib/templates/actions";
@@ -109,6 +109,46 @@ export function ContentEditor({ template, preview }: { template: TemplateProps; 
   };
   const insertCode = (code: string) => exec("insertText", code);
 
+  /**
+   * Indent / outdent. execCommand("indent") wraps paragraphs in <blockquote style="margin…">, and the
+   * sanitiser drops the style, so it would print as a quote. Instead: list items nest (plain <ul>/<ol>,
+   * which the sanitiser keeps) and paragraphs get an allow-listed `indent-1…3` class.
+   */
+  const indent = (delta: 1 | -1) => {
+    const editor = editorRef.current;
+    if (ro || !editor) return;
+    editor.focus();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount || !editor.contains(sel.anchorNode)) return;
+
+    const anchor = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement;
+    const li = anchor?.closest("li");
+    if (li && editor.contains(li)) {
+      exec(delta > 0 ? "indent" : "outdent");
+      return;
+    }
+
+    const blocksInRange = () => {
+      const range = sel.getRangeAt(0);
+      return Array.from(editor.children).filter(
+        (el): el is HTMLElement => el instanceof HTMLElement && el.matches("p, div") && range.intersectsNode(el),
+      );
+    };
+    let blocks = blocksInRange();
+    // Text typed straight into the editor has no block yet — give it a paragraph first.
+    if (!blocks.length) {
+      document.execCommand("formatBlock", false, "p");
+      blocks = blocksInRange();
+    }
+    for (const el of blocks) {
+      const current = Number(/(?:^|\s)indent-(\d)(?:\s|$)/.exec(el.className)?.[1] ?? 0);
+      const next = Math.max(0, Math.min(MAX_INDENT, current + delta));
+      if (next) el.className = `indent-${next}`;
+      else el.removeAttribute("class");
+    }
+    syncHtml();
+  };
+
   /** Live preview with a real company — same sanitise + merge as printing. */
   const letter: RenderedLetter = useMemo(() => {
     const values = { ...preview.values, OFFER: offer };
@@ -180,8 +220,8 @@ export function ContentEditor({ template, preview }: { template: TemplateProps; 
             <Sep />
             <Tool icon={faListOl} label="Numbered list" onClick={() => exec("insertOrderedList")} disabled={ro} />
             <Tool icon={faListUl} label="Bullet list" onClick={() => exec("insertUnorderedList")} disabled={ro} />
-            <Tool icon={faOutdent} label="Outdent" onClick={() => exec("outdent")} disabled={ro} />
-            <Tool icon={faIndent} label="Indent" onClick={() => exec("indent")} disabled={ro} />
+            <Tool icon={faOutdent} label="Outdent" onClick={() => indent(-1)} disabled={ro} />
+            <Tool icon={faIndent} label="Indent" onClick={() => indent(1)} disabled={ro} />
             <Tool icon={faQuoteLeft} label="Quote" onClick={() => exec("formatBlock", "blockquote")} disabled={ro} />
             <Tool icon={faGripLines} label="Horizontal line" onClick={() => exec("insertHorizontalRule")} disabled={ro} />
             <Tool label="Pound sign" onClick={() => exec("insertText", "£")} disabled={ro}>
@@ -241,7 +281,7 @@ export function ContentEditor({ template, preview }: { template: TemplateProps; 
               document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
               syncHtml();
             }}
-            className="min-h-[300px] px-5 py-4 text-[13px] leading-[20px] text-ink outline-none [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_ul]:list-disc [&_ul]:pl-5"
+            className="min-h-[300px] px-5 py-4 text-[13px] leading-[20px] text-ink outline-none [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-3 [&_s]:line-through [&_ul]:list-disc [&_ul]:pl-5 [&_.indent-1]:pl-6 [&_.indent-2]:pl-12 [&_.indent-3]:pl-18"
           />
         </div>
         {unknownCodes.length ? (

@@ -5,7 +5,7 @@ import { businessSettings, companies, exclusions, notifications, pulls, users } 
 import { getOfficers, searchIncorporations, type ChSearchCompany } from "@/lib/companies-house/client";
 import { sendMail } from "@/lib/mail";
 import { addDays, dateInTz, daysBetween, formatSaTime, todaysScheduleStart, UK_TZ } from "./dates";
-import { evaluate, normLine, pickDirector, SHARED_ADDRESS_THRESHOLD, toAddress, type RuleContext } from "./eligibility";
+import { evaluate, normLine, pickDirector, SHARED_ADDRESS_THRESHOLD, SHARED_POSTCODE_THRESHOLD, toAddress, type RuleContext } from "./eligibility";
 
 /** Postgres advisory-lock id — only one pull may run at a time, across all processes. */
 const LOCK_ID = 4_310_001;
@@ -83,7 +83,7 @@ export async function startPull(opts: { trigger: PullTrigger; userId?: string; w
       })
       .returning({ id: pulls.id });
 
-    const job = executePull(row.id, window, attempt)
+    const job = executePull(row.id, window, attempt, opts.trigger)
       .catch((e) => console.error("[pull] crashed", e))
       .finally(async () => {
         await client.query("SELECT pg_advisory_unlock($1)", [LOCK_ID]).catch(() => {});
@@ -158,7 +158,7 @@ async function pullWindow(trigger: PullTrigger, now: Date) {
 /* The pull                                                            */
 /* ================================================================== */
 
-async function executePull(pullId: string, window: { from: string; to: string }, attempt: number) {
+async function executePull(pullId: string, window: { from: string; to: string }, attempt: number, trigger: PullTrigger) {
   const progress = (set: Partial<typeof pulls.$inferInsert>) =>
     db.update(pulls).set({ ...set, heartbeatAt: new Date() }).where(eq(pulls.id, pullId));
 
@@ -230,7 +230,7 @@ async function executePull(pullId: string, window: { from: string; to: string },
     const [ready] = await db
       .select({ n: count() })
       .from(companies)
-      .where(and(between(companies.incorporatedOn, window.from, window.to), eq(companies.letterState, "not_reviewed")));
+      .where(and(between(companies.incorporatedOn, window.from, window.to), inArray(companies.letterState, ["not_reviewed", "added"])));
     const [issues] = await db
       .select({ n: count() })
       .from(companies)
@@ -241,7 +241,7 @@ async function executePull(pullId: string, window: { from: string; to: string },
 
     const at = formatSaTime(finishedAt);
     await db.insert(notifications).values([
-      { kind: "pull_complete", title: "Morning pull complete", detail: `${(ready?.n ?? 0).toLocaleString("en-GB")} companies ready · ${at}` },
+      { kind: "pull_complete", title: trigger === "manual" ? "Pull complete" : "Morning pull complete", detail: `${(ready?.n ?? 0).toLocaleString("en-GB")} companies ready · ${at}` },
       ...((issues?.n ?? 0) > 0
         ? [{ kind: "address_issues", title: `${issues!.n} address issues`, detail: `Fix before printing today’s run · ${at}` }]
         : []),
@@ -280,6 +280,22 @@ async function insertCompanies(items: ChSearchCompany[], pullId: string) {
     added += rows.length;
   }
   return added;
+}
+
+/**
+ * Re-run the rules (after a rule change) for companies nobody has touched yet:
+ * not reviewed / address issue / skipped by a rule, no fixed posting address.
+ * Excluded, manually skipped, added, printed and sent companies are left alone.
+ */
+export async function recheckRules(from: string, to: string) {
+  const reset = await db.execute(sql`
+    UPDATE companies SET eligibility = NULL
+    WHERE incorporated_on BETWEEN ${from}::date AND ${to}::date
+      AND posting_address IS NULL
+      AND (letter_state IN ('not_reviewed', 'address_issue') OR (letter_state = 'skipped' AND coalesce(skip_reason, '') <> 'manual'))`);
+  const [pull] = await db.select({ id: pulls.id }).from(pulls).where(eq(pulls.status, "succeeded")).orderBy(desc(pulls.finishedAt)).limit(1);
+  if (pull) await applyRules({ from, to }, pull.id);
+  return reset.rowCount ?? 0;
 }
 
 /** Evaluate the 7 rules for every company in the window that hasn't been checked yet. */
@@ -335,6 +351,14 @@ async function buildRuleContext(window: { from: string; to: string }, numbers: s
     GROUP BY 1
     HAVING count(*) >= ${SHARED_ADDRESS_THRESHOLD}`);
   const sharedCounts = new Map(shared.rows.map((r) => [r.k, Number(r.n)]));
+  const byPostcode = await db.execute<{ k: string; n: number }>(sql`
+    SELECT upper(regexp_replace(coalesce(registered_office->>'postcode',''), '[[:space:]]+', '', 'g')) AS k, count(*)::int AS n
+    FROM companies
+    WHERE incorporated_on >= ${addDays(window.to, -SHARED_LOOKBACK_DAYS)}::date
+      AND coalesce(registered_office->>'postcode','') <> ''
+    GROUP BY 1
+    HAVING count(*) >= ${SHARED_POSTCODE_THRESHOLD}`);
+  const sharedPostcodes = new Map(byPostcode.rows.map((r) => [r.k, Number(r.n)]));
 
   const ex = await db.select({ number: exclusions.companyNumber, name: exclusions.companyName }).from(exclusions);
   const printed = numbers.length
@@ -347,6 +371,7 @@ async function buildRuleContext(window: { from: string; to: string }, numbers: s
   return {
     ownOffice,
     sharedCounts,
+    sharedPostcodes,
     excludedNumbers: new Set(ex.map((e) => e.number).filter((n): n is string => Boolean(n))),
     excludedNames: new Set(ex.map((e) => (e.name ? normLine(e.name) : "")).filter(Boolean)),
     printedNumbers: new Set(printed.map((p) => p.number)),

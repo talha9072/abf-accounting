@@ -14,7 +14,7 @@ export default async function SignInPage({ searchParams }: PageProps<"/sign-in">
   return (
     <>
       <AuthHeading title="Sign in to ABF New Companies">Use your work account to sign in.</AuthHeading>
-      <SignInForm next={next} notice={notice} />
+      <SignInForm next={next} notice={notice} registrationOpen={process.env.REGISTRATION_ENABLED !== "false"} />
     </>
   );
 }

@@ -19,6 +19,7 @@ import {
   faMinus,
   faPlus,
   faPrint,
+  faRotateLeft,
   faShieldHalved,
   faSpinner,
   faTags,
@@ -27,7 +28,7 @@ import {
 import { PageHeader } from "@/components/admin/page-header";
 import { FilterDropdown } from "@/components/admin/filter-dropdown";
 import { DataRow, DataTable } from "@/components/admin/table";
-import { ExportModal, FixAddressModal, type FixAddressTarget } from "@/components/admin/company-modals";
+import { ExcludeModal, ExportModal, FixAddressModal, type FixAddressTarget } from "@/components/admin/company-modals";
 import { usePull, usePullHeadline } from "@/components/admin/pull-center";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/controls";
@@ -42,6 +43,7 @@ import {
   excludeCompaniesAction,
   removeFromRunAction,
   undoExcludeAction,
+  unskipCompanyAction,
   type ActionResult,
   type Target,
 } from "@/lib/companies/actions";
@@ -93,6 +95,7 @@ export function CompaniesFeed({
 
   const [modal, setModal] = useState<"export" | "fix" | null>(initialModal);
   const [fixTarget, setFixTarget] = useState<FixAddressTarget | null>(null);
+  const [excluding, setExcluding] = useState<{ target: Target; what: string } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
   const [query, setQuery] = useState(filters.q);
@@ -180,14 +183,17 @@ export function CompaniesFeed({
       });
     });
 
-  const exclude = (t: Target) =>
-    run(() => excludeCompaniesAction(t), (n) => `${fmt(n)} ${n === 1 ? "company" : "companies"} excluded`, undoExcludeAction);
+  /** Opens the reason picker; the exclusion runs once a reason is chosen. */
+  const exclude = (t: Target, what: string) => setExcluding({ target: t, what });
+  const confirmExclude = (t: Target, reason: string) =>
+    run(() => excludeCompaniesAction(t, reason), (n) => `${fmt(n)} ${n === 1 ? "company" : "companies"} excluded`, undoExcludeAction);
   const addToRun = (t: Target) =>
     run(() => addToRunAction(t), (n) => `${fmt(n)} added to today’s print run`, removeFromRunAction);
   const removeFromRun = (numbers: string[]) =>
     run(() => removeFromRunAction(numbers), (n) => `${fmt(n)} removed from the print run`);
   const unexclude = (numbers: string[]) =>
     run(() => undoExcludeAction(numbers), (n) => `${fmt(n)} ${n === 1 ? "company is" : "companies are"} no longer excluded`);
+  const unskip = (r: FeedRow) => run(() => unskipCompanyAction(r.number), () => `${r.name} is no longer skipped`);
 
   const openFix = (r: FeedRow) => {
     setFixTarget({ number: r.number, name: r.name, ...r.fix });
@@ -362,7 +368,7 @@ export function CompaniesFeed({
           </>
         ) : null}
         <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="secondary" icon={busy ? faSpinner : faBan} disabled={busy || selectedCount === 0} onClick={() => exclude(target)}>
+          <Button size="sm" variant="secondary" icon={busy ? faSpinner : faBan} disabled={busy || selectedCount === 0} onClick={() => exclude(target, selectedCount === 1 ? "1 company" : `${fmt(selectedCount)} companies`)}>
             Exclude
           </Button>
           <Button size="sm" icon={busy ? faSpinner : faPlus} disabled={busy || selectedCount === 0} onClick={() => addToRun(target)}>
@@ -400,7 +406,9 @@ export function CompaniesFeed({
         }
       >
         {data.rows.length === 0 ? (
-          <EmptyState filtered={Boolean(filters.q) || filters.type !== "all" || filters.sic !== "all" || filters.loc !== "all"} />
+          <EmptyState
+            filtered={Boolean(filters.q) || filters.inc !== "since-last" || filters.type !== "all" || filters.sic !== "all" || filters.loc !== "all"}
+          />
         ) : (
           data.rows.map((r, i) => (
             <CompanyTableRow
@@ -411,10 +419,11 @@ export function CompaniesFeed({
               onToggle={() => toggle(r.number)}
               onOpen={() => router.push(`/new-companies/${r.number}`)}
               onFix={() => openFix(r)}
-              onExclude={() => exclude({ numbers: [r.number] })}
+              onExclude={() => exclude({ numbers: [r.number] }, r.name)}
               onAdd={() => addToRun({ numbers: [r.number] })}
               onRemove={() => removeFromRun([r.number])}
               onUnexclude={() => unexclude([r.number])}
+              onUnskip={() => unskip(r)}
             />
           ))
         )}
@@ -431,10 +440,16 @@ export function CompaniesFeed({
         open={modal === "fix"}
         onClose={() => setModal(null)}
         target={fixTarget}
-        onSaved={(message) => {
+        onSaved={(t) => {
           router.refresh();
-          toast({ message });
+          toast(t);
         }}
+      />
+      <ExcludeModal
+        open={excluding !== null}
+        onClose={() => setExcluding(null)}
+        what={excluding?.what ?? ""}
+        onConfirm={(reason) => excluding && confirmExclude(excluding.target, reason)}
       />
     </>
   );
@@ -472,6 +487,7 @@ function CompanyTableRow({
   onAdd,
   onRemove,
   onUnexclude,
+  onUnskip,
 }: {
   row: FeedRow;
   index: number;
@@ -483,8 +499,10 @@ function CompanyTableRow({
   onAdd: () => void;
   onRemove: () => void;
   onUnexclude: () => void;
+  onUnskip: () => void;
 }) {
   const st = stateView(r);
+  const manualSkip = r.state === "skipped" && r.skipReason === "manual";
   const primary =
     r.state === "not_reviewed"
       ? { label: "Exclude", onClick: onExclude }
@@ -494,7 +512,9 @@ function CompanyTableRow({
           ? { label: "Fix address", onClick: onFix }
           : r.state === "excluded"
             ? { label: "Undo", onClick: onUnexclude }
-            : null;
+            : manualSkip
+              ? { label: "Un-skip", onClick: onUnskip }
+              : null;
 
   return (
     <DataRow index={index} highlight={r.state === "address_issue" ? "warning" : undefined}>
@@ -566,6 +586,11 @@ function CompanyTableRow({
               <MenuItem icon={faArrowUpRightFromSquare} href={`https://find-and-update.company-information.service.gov.uk/company/${r.number}`}>
                 Open on Companies House
               </MenuItem>
+              {manualSkip ? (
+                <MenuItem icon={faRotateLeft} onClick={() => (close(), onUnskip())}>
+                  Move back to Not reviewed
+                </MenuItem>
+              ) : null}
               {r.state === "excluded" ? (
                 <MenuItem icon={faBan} onClick={() => (close(), onUnexclude())}>
                   Remove exclusion

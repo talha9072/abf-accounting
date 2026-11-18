@@ -17,6 +17,7 @@ export default async function PrintPage({ searchParams }: PageProps<"/print">) {
       recentRuns={recent.filter((r) => r.status === "confirmed")}
       templates={templates.map((t) => ({ id: t.id, name: t.name, greeting: t.greeting }))}
       templateId={templateId}
+      openLabels={sp.labels === "1"}
     />
   );
 }

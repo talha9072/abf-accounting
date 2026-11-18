@@ -6,11 +6,10 @@ history of what was sent.
 
 Design source: Figma **ABF Accounting → 02 — New Companies Admin**.
 
-> **Status:** every screen runs on PostgreSQL — auth, the Companies House pull,
-> New Companies, print runs, letter templates, history, notes, notifications and
-> My account. Still to do before go-live: an email provider in `src/lib/mail.ts`
-> (emails are printed to the console in dev), two-step sign-in, and removing
-> `PULL_LIMIT` from the environment.
+> **Status:** every screen runs on PostgreSQL — auth (with two-step sign-in), the
+> Companies House pull, New Companies, print runs, letter templates, history, notes,
+> notifications, My account and Business settings. Before go-live: fill in the SMTP
+> settings (see *Email*), set `AUTH_ENCRYPTION_KEY`, and remove `PULL_LIMIT`.
 
 ## Stack
 
@@ -35,7 +34,10 @@ npm run dev                    # http://localhost:3000
 Useful scripts: `npm run typecheck`, `npm run lint`, `npm run db:studio` (browse the DB),
 `npm run db:generate` (after editing `src/lib/db/schema.ts` → writes a new SQL file).
 
-In development, password-reset emails are printed to the terminal running `npm run dev`.
+In development (no `SMTP_HOST`), emails are printed to the terminal running `npm run dev`.
+
+If Chrome shows **HTTP 431** on localhost (too many localhost cookies from other projects), open
+http://127.0.0.1:3000 instead — it's allowed in `next.config.ts` (`allowedDevOrigins`).
 
 ## Screens
 
@@ -48,7 +50,10 @@ In development, password-reset emails are printed to the terminal running `npm r
 | `/print/preview` | Print Preview (+ confirm modal, `?confirm=1`) |
 | `/letter-templates/[id]` (+ `/replace-codes`, `/settings`, `/versions`) | Letter Templates — Content / Replace codes / Settings / Version history · New template, Leave without saving, Insert replace code menu, toasts |
 | `/history?tab=sent\|excluded\|not-sent\|print-runs` | History · Print run details modal |
-| `/account` | My account (reads the real signed-in user) · Change password modal |
+| `/account` | My account (reads the real signed-in user) · Change password modal · Two-step sign-in set-up / turn off / new recovery codes |
+| `/sign-in/verify` | Two-step sign-in code (authenticator app or recovery code) |
+| `/settings` | Business settings — letterhead, footer, `##BRAND_…#` codes, reference prefix, QR link, own office for the pull (admins edit) |
+| `/help` | Help & how it works (account menu) |
 | Top bar | ⌘K / Ctrl K search panel, notifications panel, account menu |
 
 ### Design fixes made while building
@@ -65,6 +70,7 @@ In development, password-reset emails are printed to the terminal running `npm r
 - **No account enumeration:** same timing for unknown emails (dummy hash check); forgot-password always shows the same message.
 - **Reset links:** single-use, 30-minute expiry, stored hashed; using one signs out every device. Changing your password signs out other devices.
 - **Registration:** only `ALLOWED_SIGNUP_DOMAINS` emails; first account becomes admin; turn off with `REGISTRATION_ENABLED=false`.
+- **Two-step sign-in (optional, per user):** authenticator-app codes (TOTP, RFC 6238, SHA-1, 6 digits, 30 s, ±1 step). The secret is AES-256-GCM encrypted with `AUTH_ENCRYPTION_KEY`; a code can't be used twice. After the password, a 10-minute challenge (hashed token in an `HttpOnly` cookie) allows 5 tries. 10 one-time recovery codes (stored hashed). "Don't ask on this computer for 30 days" stores a hashed trusted-device token; a password reset or turning 2-step off/on forgets every trusted computer. Turning it off or making new recovery codes needs the password. Checks: `npx tsx --conditions=react-server scripts/test-totp.ts`.
 - **Other:** Server Actions (built-in Origin/CSRF check), zod validation on every input, safe `next=` redirects only, strict security headers + CSP (`next.config.ts`), `Cache-Control: no-store` on signed-in pages, `proxy.ts` guard + DAL check in every layout/action.
 
 ## Companies House pull
@@ -72,7 +78,7 @@ In development, password-reset emails are printed to the terminal running `npm r
 Every day at **06:00 South Africa time** (`Africa/Johannesburg`) the app pulls every company incorporated since the last successful pull, using the read-only Companies House REST API (`COMPANIES_HOUSE_API_KEY`).
 
 1. **Fetch** — advanced company search, day by day, 5,000 per page. One day of overlap catches late-indexed companies; up to 14 missed days are caught up automatically.
-2. **Rules** — the 7 checks from the design (`src/lib/pull/eligibility.ts`): Ltd/LLP, complete UK address, not your own office, not a shared/agent address (≥ 5 companies at one address in 14 days), not the Companies House default address, not excluded, not printed before. Results: `not_reviewed` (ready), `address_issue`, `excluded`, `skipped` + `skip_reason`.
+2. **Rules** — the 7 checks from the design (`src/lib/pull/eligibility.ts`): Ltd/LLP, complete UK address, not your own office, not a shared/agent address (≥ 5 companies at one address, or ≥ 8 at one postcode — virtual offices give each client its own "Office 1234" — in 14 days), not the Companies House default address, not excluded, not printed before. Results: `not_reviewed` (ready), `address_issue`, `excluded`, `skipped` + `skip_reason`.
 3. **Directors** — one officers call per ready company to get the first active director's name for the letter.
 4. **Done** — counts saved on the `pulls` row, in-app notifications added.
 
@@ -85,7 +91,7 @@ Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s)
 - `external` — run `npm run pull` from cron (e.g. every 10 minutes; it only pulls when due), or call `GET /api/cron/pull` with `Authorization: Bearer $CRON_SECRET`.
 - Anyone signed in can press **Run pull now** (sidebar → Companies House card); manual pulls include today.
 
-`npm run pull -- --now` forces a manual pull from the terminal. `npx tsx scripts/test-eligibility.ts` checks the rules.
+`npm run pull -- --now` forces a manual pull from the terminal. `npm run pull -- --recheck 2026-11-01 2026-11-17` re-runs the rules for untouched companies after a rule change (no API calls). `npx tsx --conditions=react-server scripts/test-eligibility.ts` checks the rules.
 
 ## Printing letters
 
@@ -102,6 +108,16 @@ Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s)
 
 Template HTML is reduced to an allow-list of formatting tags and every merged value is HTML-escaped (`src/lib/letters`). Checks: `npx tsx scripts/test-letters.ts`.
 
+## Email
+
+`src/lib/mail.ts` sends over SMTP (nodemailer), so any provider works — Microsoft 365 (`smtp.office365.com`, 587), Google Workspace (`smtp.gmail.com`, 587, app password), your host's mailbox, or Postmark / Brevo / SES SMTP. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`. Port 465 uses TLS, 587 requires STARTTLS. A failed send is logged and never breaks sign-in or the pull. Test it with:
+
+```bash
+npx tsx --conditions=react-server scripts/test-mail.ts you@example.com
+```
+
+Emails sent: password-reset links, and the "morning pull failed" alert (to users who keep that switched on in My account). My account shows a note while SMTP isn't set up.
+
 ## Going live — database
 
 All schema changes are plain SQL files in **`/drizzle`** (`0000_init.sql`, …). They are the source of truth for the live database.
@@ -110,6 +126,7 @@ All schema changes are plain SQL files in **`/drizzle`** (`0000_init.sql`, …).
 2. Set `DATABASE_URL` (and `DATABASE_SSL=true` if your host requires TLS), `APP_URL=https://your-domain`, `ALLOWED_SIGNUP_DOMAINS`.
 3. Run `npm run db:migrate` from the server/CI — or run the `.sql` files in `/drizzle` in order with `psql`.
 4. Create the first admin by registering, then set `REGISTRATION_ENABLED=false`.
-5. Before launch: plug an email provider into `src/lib/mail.ts`, serve over HTTPS, and make sure your proxy sets `X-Forwarded-For`.
+5. Before launch: set the SMTP settings and `AUTH_ENCRYPTION_KEY` (32 random bytes, base64 — never change it later), remove `PULL_LIMIT`, serve over HTTPS, and make sure your proxy sets `X-Forwarded-For`.
+6. Open **Business settings** and check your details (they go on every letter and drive the "not your own office" rule).
 
 Never run `npm run db:seed` in production (it refuses to).

@@ -2,6 +2,7 @@ import { faQrcode } from "@fortawesome/free-solid-svg-icons";
 import { Logo } from "@/components/brand/logo";
 import { Icon } from "@/components/ui/icon";
 import type { RenderedLetter } from "@/lib/letters/data";
+import { letterFooterLines } from "@/lib/letters/footer";
 import { formatLongDate } from "@/lib/companies/format";
 
 const BASE_W = 560; // A4 drawn at 560 × 792 (2.667 px/mm), then scaled
@@ -116,7 +117,7 @@ export function PrintedLetter({
         <div className="mt-[21px] flex flex-col gap-[10.35px] text-[8.94px] leading-[1.5]">
           <p className="text-[9.41px] font-semibold">{v.greeting}</p>
           <div
-            className="flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_li]:ml-3 [&_ol]:list-decimal [&_ul]:list-disc"
+            className="flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_.indent-1]:pl-[16px] [&_.indent-2]:pl-[32px] [&_.indent-3]:pl-[48px] [&_li]:ml-3 [&_ol]:list-decimal [&_s]:line-through [&_ul]:list-disc"
             dangerouslySetInnerHTML={{ __html: v.bodyHtml }}
           />
         </div>
@@ -149,12 +150,9 @@ export function PrintedLetter({
 
         {/* Footer (always printed) */}
         <div className="mt-auto flex flex-col gap-[3.8px] border-t-[0.94px] border-navy/12 pt-[9.4px] text-[6.59px] leading-[1.4] text-muted">
-          <p>
-            Don’t want letters from us? Email {v.business.email} or call {v.business.phone}, quote {v.reference} and we’ll stop. We
-            found your company on the public Companies House register — see {v.business.web}/privacy for how we use this
-            information.
-          </p>
-          <p>{v.business.registration}</p>
+          {letterFooterLines(v.business, v.reference).map((line, i) => (
+            <p key={i}>{line}</p>
+          ))}
         </div>
       </div>
     </div>

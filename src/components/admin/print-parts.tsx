@@ -43,30 +43,62 @@ export function PrintSetupBanner({ className }: { className?: string }) {
   );
 }
 
-const STEPS = [
-  { n: 1, label: "Select companies", href: "/new-companies?view=not-reviewed" },
-  { n: 2, label: "Choose template", href: "/print" },
-  { n: 3, label: "Preview", href: "/print/preview" },
-  { n: 4, label: "Print letters & confirm", href: "/print" },
-  { n: 5, label: "Print labels", href: "/print" },
-];
+/** `path?a=1&b=2`, skipping empty values. */
+function withQuery(path: string, params: Record<string, string | null | undefined>) {
+  const sp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) sp.set(k, v);
+  return sp.size ? `${path}?${sp}` : path;
+}
 
-export function PrintSteps({ current }: { current: number }) {
+/**
+ * The five-step strip. `template` (the chosen template id, if not the default) is kept on every link.
+ * Step 4 opens the "Did all letters print?" check when a run is waiting for it, otherwise the Preview
+ * (where printing happens); step 5 opens the labels for the latest run. Steps with nothing to open are plain labels.
+ */
+export function PrintSteps({
+  current,
+  template,
+  openRun = false,
+  labelsRun = false,
+}: {
+  current: number;
+  template?: string | null;
+  /** A printed run is waiting for "Did all letters print?". */
+  openRun?: boolean;
+  /** There is a run whose labels can be printed. */
+  labelsRun?: boolean;
+}) {
+  const steps: Array<{ n: number; label: string; href: string | null; hint?: string }> = [
+    { n: 1, label: "Select companies", href: "/new-companies?view=not-reviewed" },
+    { n: 2, label: "Choose template", href: withQuery("/print", { template }) },
+    { n: 3, label: "Preview", href: withQuery("/print/preview", { template }) },
+    {
+      n: 4,
+      label: "Print letters & confirm",
+      href: openRun ? withQuery("/print/preview", { template, confirm: "1" }) : current === 3 ? null : withQuery("/print/preview", { template }),
+      hint: "Use “Print letters” on this page",
+    },
+    { n: 5, label: "Print labels", href: labelsRun ? withQuery("/print", { template, labels: "1" }) : null, hint: "Available after the first print run" },
+  ];
+  const cls = "inline-flex h-7 items-center rounded-[9px] px-[11px] text-[11px] leading-[14px] transition-colors";
   return (
     <nav aria-label="Print steps" className="flex flex-wrap items-center gap-1.5">
-      {STEPS.map((s) => (
-        <Link
-          key={s.n}
-          href={s.href}
-          aria-current={s.n === current ? "step" : undefined}
-          className={cn(
-            "inline-flex h-7 items-center rounded-[9px] px-[11px] text-[11px] leading-[14px] transition-colors",
-            s.n === current ? "bg-mint font-bold text-ink" : "font-medium text-muted hover:bg-white hover:text-ink",
-          )}
-        >
-          {s.n} · {s.label}
-        </Link>
-      ))}
+      {steps.map((s) =>
+        s.href ? (
+          <Link
+            key={s.n}
+            href={s.href}
+            aria-current={s.n === current ? "step" : undefined}
+            className={cn(cls, s.n === current ? "bg-mint font-bold text-ink" : "font-medium text-muted hover:bg-white hover:text-ink")}
+          >
+            {s.n} · {s.label}
+          </Link>
+        ) : (
+          <span key={s.n} title={s.hint} aria-current={s.n === current ? "step" : undefined} className={cn(cls, "cursor-default font-medium text-muted")}>
+            {s.n} · {s.label}
+          </span>
+        ),
+      )}
     </nav>
   );
 }
@@ -86,12 +118,34 @@ function openTab() {
   };
 }
 
-export function usePrintFlow() {
+/** A modal to open straight away from a link (`/print?labels=1`, `/print/preview?confirm=1`). */
+export type FlowDeepLink = { modal: "confirm" | "labels"; run: FlowRun } | null;
+
+export function usePrintFlow(deepLink: FlowDeepLink = null) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
   const [run, setRun] = useState<FlowRun | null>(null);
   const [modal, setModal] = useState<"confirm" | "labels" | null>(null);
+
+  // Open the linked modal once per link (state adjusted during render, not in an effect).
+  const linkKey = deepLink ? `${deepLink.modal}:${deepLink.run.id}` : null;
+  const [seenLink, setSeenLink] = useState<string | null>(null);
+  if (linkKey !== seenLink) {
+    setSeenLink(linkKey);
+    if (deepLink) {
+      setRun(deepLink.run);
+      setModal(deepLink.modal);
+    }
+  }
+  // …then drop ?labels / ?confirm so a reload or Back doesn't open it again (and the same link works next time).
+  useEffect(() => {
+    if (!linkKey) return;
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete("labels");
+    sp.delete("confirm");
+    router.replace(sp.size ? `${window.location.pathname}?${sp}` : window.location.pathname, { scroll: false });
+  }, [linkKey, router]);
 
   /** "Print N letters" — creates the run and opens the printable letters. */
   const printQueue = (templateId: string | null, incorporatedLabel?: string) => {
@@ -104,7 +158,7 @@ export function usePrintFlow() {
         return;
       }
       go(`/print-doc/${r.runId}/letters?auto=1`);
-      setRun({ id: r.runId, reference: r.reference, letters: r.letters, template: "", incorporatedLabel });
+      setRun({ id: r.runId, reference: r.reference, letters: r.letters, template: r.template, incorporatedLabel });
       setModal("confirm");
       router.refresh();
     });

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { and, count, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { passwordResetTokens, users } from "@/lib/db/schema";
+import { passwordResetTokens, twoFactorChallenges, users } from "@/lib/db/schema";
 import { sendMail } from "@/lib/mail";
 import { generateToken, sha256 } from "./crypto";
 import { getCurrentSession } from "./dal";
@@ -18,6 +18,16 @@ import {
 } from "./rate-limit";
 import { getClientMeta } from "./request";
 import { createSession, destroyCurrentSession, revokeUserSessions } from "./session";
+import {
+  CHALLENGE_MAX_ATTEMPTS,
+  checkSecondFactor,
+  clearChallenge,
+  createChallenge,
+  forgetTrustedDevices,
+  getChallenge,
+  isTrustedDevice,
+  trustThisDevice,
+} from "./two-factor";
 import {
   changePasswordSchema,
   forgotSchema,
@@ -69,7 +79,7 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   }
 
   const [user] = await db
-    .select({ id: users.id, passwordHash: users.passwordHash, status: users.status })
+    .select({ id: users.id, passwordHash: users.passwordHash, status: users.status, twoFactorEnabled: users.twoFactorEnabled })
     .from(users)
     .where(eq(users.email, email))
     .limit(1);
@@ -103,13 +113,71 @@ export async function signInAction(_prev: FormState, formData: FormData): Promis
   }
 
   await recordAttempt("sign_in", { email, ip, success: true });
-  await db
-    .update(users)
-    .set({ failedLoginCount: 0, lockedUntil: null, lastLoginAt: new Date() })
-    .where(eq(users.id, user.id));
+  await db.update(users).set({ failedLoginCount: 0, lockedUntil: null }).where(eq(users.id, user.id));
+
+  // Two-step sign-in: the password is right, now ask for the authenticator code
+  // (unless this computer was trusted in the last 30 days).
+  if (user.twoFactorEnabled && !(await isTrustedDevice(user.id))) {
+    await createChallenge(user.id, remember, safeNextPath(next));
+    redirect("/sign-in/verify");
+  }
+
+  await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
   await createSession(user.id, remember);
 
   redirect(safeNextPath(next));
+}
+
+/* ------------------------------------------------------------------ */
+/* Two-step sign-in — second step                                      */
+/* ------------------------------------------------------------------ */
+
+const verifySchema = z.object({
+  code: z.string().trim().min(1, "Enter the code from your authenticator app.").max(32, "That code is too long."),
+  trust: z.preprocess((v) => v === "on", z.boolean()),
+});
+
+export async function verifyTwoFactorAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const challenge = await getChallenge();
+  if (!challenge) {
+    await clearChallenge();
+    return { message: "This sign-in has expired. Go back and enter your password again.", values: { expired: "1" } };
+  }
+
+  const parsed = verifySchema.safeParse({ code: formData.get("code") ?? "", trust: formData.get("trust") });
+  if (!parsed.success) return { fieldErrors: fieldErrors(parsed.error) };
+
+  const { ip } = await getClientMeta();
+  if (await isIpLimited("two_factor", ip)) {
+    return { message: "Too many wrong codes from this network. Wait 15 minutes and try again." };
+  }
+
+  const result = await checkSecondFactor(challenge.userId, parsed.data.code);
+  await recordAttempt("two_factor", { email: challenge.email, ip, success: Boolean(result) });
+
+  if (!result) {
+    const attempts = challenge.attempts + 1;
+    await db.update(twoFactorChallenges).set({ attempts }).where(eq(twoFactorChallenges.id, challenge.id));
+    const left = CHALLENGE_MAX_ATTEMPTS - attempts;
+    if (left <= 0) {
+      await clearChallenge(challenge.id);
+      return { message: "Too many wrong codes. Go back and enter your password again.", values: { expired: "1" } };
+    }
+    return {
+      fieldErrors: {
+        code: [
+          `${/^\d[\d ]*$/.test(parsed.data.code) ? "That code isn't right — use the newest code in your app." : "That recovery code isn't valid or was already used."} ${left} ${left === 1 ? "try" : "tries"} left.`,
+        ],
+      },
+    };
+  }
+
+  await clearChallenge(challenge.id);
+  await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, challenge.userId));
+  if (parsed.data.trust) await trustThisDevice(challenge.userId);
+  await createSession(challenge.userId, challenge.remember);
+
+  redirect(safeNextPath(challenge.nextPath ?? undefined));
 }
 
 /* ------------------------------------------------------------------ */
@@ -278,6 +346,8 @@ export async function resetPasswordAction(_prev: FormState, formData: FormData):
   });
   // Kill every existing session — anyone holding an old cookie is signed out.
   await revokeUserSessions(row.userId);
+  // …and every computer has to enter a two-step code again.
+  await forgetTrustedDevices(row.userId);
 
   redirect("/sign-in?reset=1");
 }

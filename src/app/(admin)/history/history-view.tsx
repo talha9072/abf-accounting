@@ -69,6 +69,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
   const rowsShown =
     tab === "sent" ? data.sent.length : tab === "excluded" ? data.excluded.length : tab === "not-sent" ? data.notSent.length : data.runs.length;
   const totalForTab = tab === "sent" ? counts.sent : tab === "excluded" ? counts.excluded : tab === "not-sent" ? counts.notSent : counts.printRuns;
+  const searchLabel = tab === "print-runs" ? "Search run, template, company name or number" : "Search company name or number";
   const footer = (label: string) => (
     <>
       <span className="text-[12px] text-muted">
@@ -92,12 +93,11 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           value={query}
           maxLength={100}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search company name or number"
-          aria-label="Search company name or number"
+          placeholder={searchLabel}
+          aria-label={searchLabel}
           className="h-10 w-full max-w-[360px]"
           inputClassName="text-[13px]"
         />
-        <span className="ml-auto text-[12px] leading-4 text-muted">Kept for 12 months</span>
       </div>
 
       <BoxedTabs
@@ -151,7 +151,12 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
                   {r.printRun}
                 </button>
                 <span className="truncate text-muted">{r.printedBy}</span>
-                <a href={`/print-doc/${r.runId}/letters`} target="_blank" rel="noopener" className="text-brand hover:underline">
+                <a
+                  href={`/print-doc/${r.runId}/letters?from=${r.position}&to=${r.position}`}
+                  target="_blank"
+                  rel="noopener"
+                  className="text-brand hover:underline"
+                >
                   View letter
                 </a>
               </DataRow>
@@ -175,7 +180,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("excluded")}
         >
           {data.excluded.length === 0 ? (
-            <Empty text="Nobody is on the do-not-contact list." />
+            <Empty text={q ? "Nothing matches that search." : "Nobody is on the do-not-contact list."} />
           ) : (
             data.excluded.map((r, i) => (
               <DataRow key={`${r.number}-${i}`} index={i}>
@@ -213,7 +218,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("not sent")}
         >
           {data.notSent.length === 0 ? (
-            <Empty text="Every company has had a letter or was excluded." />
+            <Empty text={q ? "Nothing matches that search." : "Every company has had a letter or was excluded."} />
           ) : (
             data.notSent.map((c, i) => (
               <DataRow key={c.number} index={i}>
@@ -255,7 +260,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("print runs")}
         >
           {data.runs.length === 0 ? (
-            <Empty text="No print runs yet." />
+            <Empty text={q ? "No print runs match that search." : "No print runs yet."} />
           ) : (
             data.runs.map((r, i) => (
               <DataRow key={r.id} index={i}>

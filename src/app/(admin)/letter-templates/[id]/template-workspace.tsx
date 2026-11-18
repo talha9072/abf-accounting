@@ -95,7 +95,23 @@ export function TemplateWorkspace({ list, template, children }: { list: Template
     if (!dirty) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    // Any other in-app link (sidebar, top bar, search…) asks first too.
+    const onClick = (e: globalThis.MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.target as Element | null)?.closest?.("a[href]");
+      if (!a || a.getAttribute("target") === "_blank" || a.hasAttribute("download")) return;
+      const url = new URL(a.getAttribute("href")!, location.href);
+      if (url.origin !== location.origin || url.pathname === location.pathname) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPendingHref(url.pathname + url.search);
+      setModal("leave");
+    };
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onClick, true);
+    };
   }, [dirty]);
 
   /** Ask before leaving the editor (other template, or another tab) with unsaved edits. */

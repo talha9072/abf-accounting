@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   faBan,
   faBuilding,
@@ -5,6 +6,7 @@ import {
   faLocationDot,
   faMinus,
   faPlus,
+  faRotateLeft,
   faShieldHalved,
   faTriangleExclamation,
   type IconDefinition,
@@ -25,6 +27,7 @@ const ICONS: Record<string, IconDefinition> = {
   removed_from_run: faMinus,
   address_fixed: faLocationDot,
   skipped: faBan,
+  skip_undone: faRotateLeft,
 };
 
 function when(d: Date) {
@@ -33,7 +36,18 @@ function when(d: Date) {
   return day === today ? formatSaTime(d) : `${formatDate(day)} ${formatSaTime(d)}`;
 }
 
-export function ActivityTimeline({ items, className, limit }: { items: ActivityItem[]; className?: string; limit?: number }) {
+export function ActivityTimeline({
+  items,
+  className,
+  limit,
+  viewAllHref,
+}: {
+  items: ActivityItem[];
+  className?: string;
+  limit?: number;
+  /** Shown under a shortened list (Overview → Activity tab). */
+  viewAllHref?: string;
+}) {
   const shown = limit ? items.slice(0, limit) : items;
   return (
     <Card className={className}>
@@ -58,6 +72,11 @@ export function ActivityTimeline({ items, className, limit }: { items: ActivityI
           </li>
         ))}
       </ol>
+      {viewAllHref && shown.length < items.length ? (
+        <Link href={viewAllHref} className="mt-2 inline-block text-[11px] font-medium text-brand hover:underline">
+          View all activity ({items.length})
+        </Link>
+      ) : null}
     </Card>
   );
 }

@@ -48,7 +48,7 @@ export async function excludeCompaniesAction(target: Target, reason?: string): P
   if (!user) return { ok: false, message: "Please sign in again." };
   const numbers = await resolveNumbers(target);
   if (!numbers?.length) return { ok: false, message: "Nothing selected." };
-  const why = (reason ?? "Excluded from New Companies").slice(0, 300);
+  const why = (typeof reason === "string" && reason.trim() ? reason.trim().replace(/\s+/g, " ") : "Excluded from New Companies").slice(0, 300);
 
   const rows = await db
     .update(companies)
@@ -62,7 +62,7 @@ export async function excludeCompaniesAction(target: Target, reason?: string): P
         rows.slice(i, i + 1000).map((r) => ({ companyNumber: r.number, companyName: r.name, reason: why, createdBy: user.id })),
       );
     }
-    await logActivity(rows, user.id, "excluded", "Excluded", `By ${user.firstName} ${user.lastName}`);
+    await logActivity(rows, user.id, "excluded", "Excluded", `${why} · by ${user.firstName} ${user.lastName}`);
     const what = rows.length === 1 ? formatCompanyName(rows[0].name) : `${rows.length} companies`;
     await notify("excluded", "Exclude added", `${what} · by ${user.firstName} ${user.lastName}`);
   }
@@ -139,7 +139,8 @@ const addressSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^(GIR ?0AA|[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/, "Enter a full UK postcode, like EH2 2QA."),
+    .transform((v) => v.replace(/\s+/g, ""))
+    .pipe(z.string().regex(/^(GIR0AA|[A-Z]{1,2}\d[A-Z\d]?\d[A-Z]{2})$/, "Enter a full UK postcode, like EH2 2QA.")),
 });
 
 export type AddressResult = { ok: true } | { ok: false; message?: string; fieldErrors?: Record<string, string[] | undefined> };
@@ -158,6 +159,7 @@ export async function fixPostingAddressAction(input: z.input<typeof addressSchem
     .set({
       postingAddress: { line1, line2: line2 || null, town, postcode: formatted, country: null },
       letterState: sql`CASE WHEN ${companies.letterState} = 'address_issue' THEN 'not_reviewed' ELSE ${companies.letterState} END::letter_state`,
+      skipReason: sql`CASE WHEN ${companies.letterState} = 'address_issue' THEN NULL ELSE ${companies.skipReason} END`,
       updatedAt: new Date(),
     })
     .where(eq(companies.companyNumber, number.toUpperCase()))
@@ -167,17 +169,57 @@ export async function fixPostingAddressAction(input: z.input<typeof addressSchem
   return { ok: true };
 }
 
-/** "Skip this company" from the address modal — it won't get a letter. */
-export async function skipCompanyAction(number: string): Promise<ActionResult> {
+/**
+ * "Skip this company" from the address modal — it won't get a letter.
+ * Only for companies still in play: printed/sent ones are history, excluded ones have their own
+ * undo, and rule-skipped ones are already skipped (overwriting their reason would lose it).
+ * `wasInRun` lets the toast's Undo put it back in the print run.
+ */
+export async function skipCompanyAction(number: string): Promise<ActionResult & { wasInRun?: boolean }> {
   const user = await auth();
   if (!user) return { ok: false, message: "Please sign in again." };
   const n = numberSchema.safeParse(number);
   if (!n.success) return { ok: false, message: "Invalid company." };
+  const [before] = await db
+    .select({ state: companies.letterState })
+    .from(companies)
+    .where(eq(companies.companyNumber, n.data.toUpperCase()))
+    .limit(1);
   const rows = await db
     .update(companies)
     .set({ letterState: "skipped", skipReason: "manual", updatedAt: new Date() })
-    .where(and(eq(companies.companyNumber, n.data.toUpperCase()), sql`${companies.letterState} NOT IN ('printed','posted')`))
+    .where(
+      and(
+        eq(companies.companyNumber, n.data.toUpperCase()),
+        inArray(companies.letterState, ["not_reviewed", "added", "address_issue"]),
+      ),
+    )
     .returning({ id: companies.id, number: companies.companyNumber });
   await logActivity(rows, user.id, "skipped", "Skipped", `By ${user.firstName} ${user.lastName}`);
+  return { ok: true, count: rows.length, numbers: rows.map((r) => r.number), wasInRun: rows.length > 0 && before?.state === "added" };
+}
+
+/**
+ * Undo a manual skip ("Move back to Not reviewed"). Only `skip_reason = 'manual'` — companies
+ * skipped by the selection rules stay skipped. Goes back to Address issue when the address is
+ * still incomplete and nobody fixed it. `backToRun` (toast Undo only) restores an "added" company.
+ */
+export async function unskipCompanyAction(number: string, backToRun = false): Promise<ActionResult> {
+  const user = await auth();
+  if (!user) return { ok: false, message: "Please sign in again." };
+  const n = numberSchema.safeParse(number);
+  if (!n.success) return { ok: false, message: "Invalid company." };
+  const addressIssue = sql`${companies.postingAddress} IS NULL AND (${companies.eligibility}->>'address_complete') = 'false'`;
+  const rows = await db
+    .update(companies)
+    .set({
+      letterState: sql`CASE WHEN ${addressIssue} THEN 'address_issue' ELSE ${backToRun ? sql`'added'` : sql`'not_reviewed'`} END::letter_state`,
+      skipReason: sql`CASE WHEN ${addressIssue} THEN 'address_complete' ELSE NULL END`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(companies.companyNumber, n.data.toUpperCase()), eq(companies.letterState, "skipped"), eq(companies.skipReason, "manual")))
+    .returning({ id: companies.id, number: companies.companyNumber, state: companies.letterState });
+  const to = rows[0]?.state === "address_issue" ? "Address issue" : rows[0]?.state === "added" ? "the print run" : "Not reviewed";
+  await logActivity(rows, user.id, "skip_undone", `Moved back to ${to}`, `By ${user.firstName} ${user.lastName}`);
   return { ok: true, count: rows.length, numbers: rows.map((r) => r.number) };
 }

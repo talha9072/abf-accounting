@@ -95,11 +95,59 @@ async function baseConditions(f: Omit<FeedFilters, "view" | "page" | "per">): Pr
       WHERE s.code ~ '^[0-9]{5}$' AND substr(s.code, 1, 2)::int BETWEEN ${section.from} AND ${section.to})`);
   }
 
-  if (f.loc !== "all") {
-    const word = f.loc === "northern-ireland" ? "northern ireland" : f.loc;
-    where.push(sql`(${companies.registeredOffice}->>'country') ILIKE ${`%${word}%`}`);
-  }
+  if (f.loc !== "all") where.push(sql`${nationSql()} = ${f.loc}`);
   return where;
+}
+
+/**
+ * UK nation of a company, worked out in SQL so counts and pagination stay exact:
+ * 'england' | 'wales' | 'scotland' | 'northern-ireland' | NULL (unknown / Crown dependency).
+ *
+ * Companies House usually stores "United Kingdom" (or nothing) as the country, so the
+ * postcode area decides first (posting address if your team fixed it, else the registered
+ * office). Border caveats: SY15–25 and CH5–8 count as Wales, the rest of SY/CH as England;
+ * a few TD/DG/NP/LD districts straddle the border and follow their area.
+ * Only when there is no usable postcode do we fall back to the country text, and then to the
+ * company number prefix (SC/SO/SL… are Scottish registrations, NI/NC/R0… Northern Irish).
+ */
+function nationSql() {
+  return sql`(SELECT CASE
+      WHEN p.area = 'BT' THEN 'northern-ireland'
+      WHEN p.area IN ('AB','DD','DG','EH','FK','G','HS','IV','KA','KW','KY','ML','PA','PH','TD','ZE') THEN 'scotland'
+      WHEN p.area IN ('CF','LD','LL','NP','SA') THEN 'wales'
+      WHEN p.area = 'SY' AND p.district BETWEEN 15 AND 25 THEN 'wales'
+      WHEN p.area = 'CH' AND p.district BETWEEN 5 AND 8 THEN 'wales'
+      WHEN p.area IN ('GY','JE','IM') THEN NULL
+      WHEN p.area IS NOT NULL THEN 'england'
+      WHEN p.country ~* 'northern[[:space:]]*ireland' THEN 'northern-ireland'
+      WHEN p.country ~* 'scotland' THEN 'scotland'
+      WHEN p.country ~* '(wales|cymru)' AND p.country !~* 'england' THEN 'wales'
+      WHEN p.country ~* 'england' AND p.country !~* 'wales' THEN 'england'
+      WHEN p.num ~ '^S[ACFGLOPRZ]' THEN 'scotland'
+      WHEN p.num ~ '^(N[ACFILOPRZ]|R0)' THEN 'northern-ireland'
+    END
+    FROM (
+      SELECT
+        substring(o.outward from '^([A-Z]{1,2})[0-9]') AS area,
+        substring(o.outward from '^[A-Z]{1,2}([0-9]{1,2})')::int AS district,
+        o.country,
+        o.num
+      FROM (
+        SELECT
+          CASE
+            WHEN x.pc ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$' THEN left(x.pc, length(x.pc) - 3)
+            WHEN x.pc ~ '^[A-Z]{1,2}[0-9][A-Z0-9]?$' THEN x.pc
+          END AS outward,
+          x.country,
+          x.num
+        FROM (
+          SELECT
+            upper(regexp_replace(coalesce(nullif(${companies.postingAddress}->>'postcode', ''), ${companies.registeredOffice}->>'postcode', ''), '[^A-Za-z0-9]', '', 'g')) AS pc,
+            coalesce(nullif(${companies.postingAddress}->>'country', ''), ${companies.registeredOffice}->>'country', '') AS country,
+            upper(${companies.companyNumber}) AS num
+        ) x
+      ) o
+    ) p)`;
 }
 
 /* ================================================================== */

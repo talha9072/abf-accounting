@@ -3,7 +3,7 @@ import { and, count, eq, gt } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { authAttempts } from "@/lib/db/schema";
 
-export type AttemptKind = "sign_in" | "register" | "reset_request" | "reset" | "change_password";
+export type AttemptKind = "sign_in" | "register" | "reset_request" | "reset" | "change_password" | "two_factor";
 
 /** Sign-in: 5 wrong passwords for one email → 15-minute lock (matches the design copy). */
 export const SIGN_IN_MAX_FAILURES = 5;
@@ -16,6 +16,7 @@ const IP_LIMITS: Record<AttemptKind, { max: number; windowMs: number }> = {
   reset_request: { max: 5, windowMs: 60 * 60 * 1000 },
   reset: { max: 10, windowMs: 60 * 60 * 1000 },
   change_password: { max: 10, windowMs: 15 * 60 * 1000 },
+  two_factor: { max: 20, windowMs: 15 * 60 * 1000 },
 };
 
 export async function recordAttempt(kind: AttemptKind, opts: { email?: string | null; ip: string; success: boolean }) {
@@ -32,7 +33,7 @@ export async function isIpLimited(kind: AttemptKind, ip: string): Promise<boolea
   const { max, windowMs } = IP_LIMITS[kind];
   const since = new Date(Date.now() - windowMs);
   const where =
-    kind === "sign_in" || kind === "change_password"
+    kind === "sign_in" || kind === "change_password" || kind === "two_factor"
       ? and(eq(authAttempts.kind, kind), eq(authAttempts.ipAddress, ip), eq(authAttempts.success, false), gt(authAttempts.createdAt, since))
       : and(eq(authAttempts.kind, kind), eq(authAttempts.ipAddress, ip), gt(authAttempts.createdAt, since));
   const [row] = await db.select({ n: count() }).from(authAttempts).where(where);
