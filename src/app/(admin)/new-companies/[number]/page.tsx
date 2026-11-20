@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { formatAddress, formatDate, sicLabel } from "@/lib/companies/format";
 import { getCompanyActivity } from "@/lib/companies/queries";
+import { letterRecipient } from "@/lib/letters/merge";
 import { latestNote } from "@/lib/notes/queries";
 import { companyLetters } from "@/lib/print/queries";
 import { formatSaTime } from "@/lib/pull/dates";
@@ -33,7 +34,11 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
   ];
   const right: Array<[string, string, string?]> = [
     ["SIC codes", c.sicCodes.length ? sicLabel(c.sicCodes[0]) : "None given", c.sicCodes.length > 1 ? `+ ${c.sicCodes.slice(1).join(", ")}` : "Primary activity"],
-    ["Director (letter goes to)", c.directorFullName ?? (c.officersFetched ? "No active director listed" : "Not fetched yet"), c.directorFirstName ? `Letter opens “Dear ${c.directorFirstName},”` : "Letter opens “To whom it may concern,”"],
+    [
+      "Director (letter goes to)",
+      c.directorFullName ?? (c.officersFetched ? `No person listed · addressed to “${letterRecipient(null, number)}”` : "Not fetched yet"),
+      c.directorFirstName ? `Letter opens “Dear ${c.directorFirstName},”` : "Letter opens “To whom it may concern,”",
+    ],
     ["Posting address", formatAddress(c.posting) || "—", c.postingAddress ? "Fixed by your team" : "Same as registered office"],
     ["Import source", "Advanced company search", `Imported ${formatDate(c.importedAt.toISOString())} at ${formatSaTime(c.importedAt)}`],
   ];

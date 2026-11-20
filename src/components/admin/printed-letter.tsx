@@ -4,6 +4,7 @@ import { Icon } from "@/components/ui/icon";
 import type { RenderedLetter } from "@/lib/letters/data";
 import { letterFooterLines } from "@/lib/letters/footer";
 import { formatLongDate } from "@/lib/companies/format";
+import { letterRecipient } from "@/lib/letters/merge";
 
 const BASE_W = 560; // A4 drawn at 560 × 792 (2.667 px/mm), then scaled
 const BASE_H = 792;
@@ -26,7 +27,7 @@ type View = {
 
 function fromRendered(l: RenderedLetter): View {
   return {
-    recipient: l.directorFullName ?? "The Director",
+    recipient: letterRecipient(l.directorFullName, l.companyNumber),
     companyName: l.companyName,
     addressLines: l.addressLines.length ? l.addressLines : ["Address missing"],
     reference: l.reference,

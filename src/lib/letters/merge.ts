@@ -32,6 +32,16 @@ export function mergeCodes(html: string, values: MergeValues, { escape = true } 
   });
 }
 
+/**
+ * Name line on the letter and the address label. With no person to name (only corporate
+ * officers), an LLP goes to "The Members" — LLPs have members, not directors.
+ * LLP numbers start OC (England & Wales), SO (Scotland) or NC (Northern Ireland).
+ */
+export function letterRecipient(fullName: string | null | undefined, companyNumber: string): string {
+  if (fullName?.trim()) return fullName.trim();
+  return /^(OC|SO|NC)\d/i.test(companyNumber) ? "The Members" : "The Director";
+}
+
 /** Greeting with the "To whom it may concern," fallback when there's no director name. */
 export function mergeGreeting(greeting: string, values: MergeValues): string {
   if (/##DIRECTOR_FIRSTNAME#/.test(greeting) && !values.DIRECTOR_FIRSTNAME) return "To whom it may concern,";

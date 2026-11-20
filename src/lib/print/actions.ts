@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { activityEvents, companies, printRunItems, printRuns } from "@/lib/db/schema";
 import { getCurrentSession } from "@/lib/auth/dal";
 import { buildLetterSnapshot, getBusiness, getPrintableTemplate } from "@/lib/letters/data";
+import { letterRecipient } from "@/lib/letters/merge";
 import { dateInTz, UK_TZ } from "@/lib/pull/dates";
 import { notify } from "@/lib/notifications/server";
 import { MAX_RUN_LETTERS as MAX_LETTERS } from "./limits";
@@ -242,7 +243,7 @@ export async function getRunLabelsAction(runId: string): Promise<string[][]> {
     .from(printRunItems)
     .where(eq(printRunItems.printRunId, runId))
     .orderBy(printRunItems.position);
-  return items.map((i) => [i.letter?.directorFullName ?? "The Director", i.letter?.companyName ?? "", ...(i.letter?.addressLines ?? [])]);
+  return items.map((i) => [letterRecipient(i.letter?.directorFullName, i.letter?.companyNumber ?? ""),i.letter?.companyName ?? "", ...(i.letter?.addressLines ?? [])]);
 }
 
 export async function markLabelsPrintedAction(runId: string): Promise<SimpleResult> {

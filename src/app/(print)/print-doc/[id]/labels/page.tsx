@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { addressLines } from "@/lib/companies/format";
+import { letterRecipient } from "@/lib/letters/merge";
 import { getRun } from "@/lib/print/queries";
 import { PrintToolbar } from "../../print-toolbar";
 
@@ -17,7 +18,7 @@ export default async function PrintLabelsDocument({ params, searchParams }: Page
   const test = sp.test === "1";
   const startAt = Math.max(1, Math.min(PER_SHEET, Number(sp.start) || 1));
   const labels = run.items.map((i) => [
-    i.letter?.directorFullName ?? "The Director",
+    letterRecipient(i.letter?.directorFullName, i.letter?.companyNumber ?? ""),
     i.letter?.companyName ?? "",
     ...(i.letter?.addressLines ?? addressLines(i.address)),
   ]);

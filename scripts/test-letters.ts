@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import { sanitizeTemplateHtml } from "../src/lib/letters/html";
-import { mergeCodes, mergeGreeting, type MergeValues } from "../src/lib/letters/merge";
+import { letterRecipient, mergeCodes, mergeGreeting, type MergeValues } from "../src/lib/letters/merge";
 import { letterFooterLines } from "../src/lib/letters/footer";
 
 const s = sanitizeTemplateHtml;
@@ -60,6 +60,13 @@ assert.equal(mergeCodes("##LETTER_HEAD#<p>x ##NOT_A_CODE#</p>##LETTER_FOOTER#", 
 // Greeting fallback when Companies House has no director name.
 assert.equal(mergeGreeting("Dear ##DIRECTOR_FIRSTNAME#,", values), "To whom it may concern,");
 assert.equal(mergeGreeting("Dear ##DIRECTOR_FIRSTNAME#,", { ...values, DIRECTOR_FIRSTNAME: "Sarah" }), "Dear Sarah,");
+// Name line / label when only corporate officers exist: LLPs (OC/SO/NC) have members, not directors.
+assert.equal(letterRecipient("Sarah Ahmed", "OC462050"), "Sarah Ahmed");
+assert.equal(letterRecipient(null, "OC462050"), "The Members");
+assert.equal(letterRecipient("  ", "SO305123"), "The Members");
+assert.equal(letterRecipient(undefined, "NC001234"), "The Members");
+assert.equal(letterRecipient(null, "16012345"), "The Director");
+assert.equal(letterRecipient(null, "SC812345"), "The Director");
 
 // The exclude footer (printed letter + Settings tab share it) carries the contact details, reference and privacy line.
 const footer = letterFooterLines({ email: "support@x.com", phone: "+44 1", web: "x.com", registration: "Reg line" }, "ABF-1");
