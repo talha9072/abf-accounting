@@ -6,7 +6,7 @@ import type { Address } from "@/lib/db/schema";
 import type { ChAddress, ChOfficer } from "@/lib/companies-house/client";
 
 export const RULES = [
-  { key: "company_type", label: "Company type is Ltd or LLP" },
+  { key: "company_type", label: "Ltd, LLP or limited by guarantee — not a CIC" },
   { key: "address_complete", label: "Address is complete" },
   { key: "not_own_office", label: "Not at your own office address" },
   { key: "not_shared_address", label: "Not a shared or agent address" },
@@ -27,10 +27,28 @@ export const SHARED_ADDRESS_THRESHOLD = Number(process.env.SHARED_ADDRESS_THRESH
  */
 export const SHARED_POSTCODE_THRESHOLD = Number(process.env.SHARED_POSTCODE_THRESHOLD ?? 8);
 
-const ALLOWED_TYPES = (process.env.ALLOWED_COMPANY_TYPES ?? "ltd,llp")
+/** Companies House types for companies limited by guarantee (incl. the "limited" exemption). */
+export const GUARANTEE_TYPES = ["private-limited-guarant-nsc", "private-limited-guarant-nsc-limited-exemption"];
+
+/**
+ * Company types that get a letter: Ltd, LLP and companies limited by guarantee (Ashley, 20 Nov 2026).
+ * CICs never do, whatever their type — see isCic().
+ */
+const ALLOWED_TYPES = (process.env.ALLOWED_COMPANY_TYPES ?? ["ltd", "llp", ...GUARANTEE_TYPES].join(","))
   .split(",")
   .map((t) => t.trim().toLowerCase())
   .filter(Boolean);
+
+/**
+ * Community interest companies (no letter — Ashley, 20 Nov 2026). Companies House marks them with
+ * company_subtype "community-interest-company" (on guarantee and share companies); a CIC's name has
+ * to end in CIC / Community Interest Company (CBC in Welsh), which catches any without the subtype.
+ */
+export function isCic(c: { name: string; companySubtype?: string | null }) {
+  if ((c.companySubtype ?? "").toLowerCase() === "community-interest-company") return true;
+  // English "CIC / Community Interest Company", Welsh "CBC / Cwmni Buddiant Cymunedol".
+  return /(?:^|\s)(?:c\.?\s?i\.?\s?c\.?|community interest company|c\.?\s?b\.?\s?c\.?|cwmni buddiant cymunedol)$/i.test(c.name.trim());
+}
 
 const UK_POSTCODE = /^(GIR ?0AA|[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2})$/i;
 
@@ -100,12 +118,12 @@ export type RuleContext = {
 };
 
 export function evaluate(
-  c: { companyNumber: string; name: string; companyType: string; address: Address },
+  c: { companyNumber: string; name: string; companyType: string; companySubtype?: string | null; address: Address },
   ctx: RuleContext,
 ): { eligibility: Eligibility; state: LetterState; skipReason: RuleKey | null } {
   const pc = normPostcode(c.address.postcode);
   const e: Eligibility = {
-    company_type: ALLOWED_TYPES.includes(c.companyType.toLowerCase()),
+    company_type: ALLOWED_TYPES.includes(c.companyType.toLowerCase()) && !isCic(c),
     address_complete: Boolean(c.address.line1 && c.address.town && UK_POSTCODE.test(c.address.postcode ?? "")),
     not_own_office: !(
       ctx.ownOffice &&

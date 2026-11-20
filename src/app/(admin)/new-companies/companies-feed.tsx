@@ -311,6 +311,7 @@ export function CompaniesFeed({
               { value: "all", label: "All types" },
               { value: "ltd", label: "Ltd" },
               { value: "llp", label: "LLP" },
+              { value: "guarantee", label: "Limited by guarantee" },
               { value: "other", label: "Other types" },
             ]}
           />

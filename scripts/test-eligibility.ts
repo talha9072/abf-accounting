@@ -3,7 +3,7 @@
  *   npx tsx scripts/test-eligibility.ts
  */
 import assert from "node:assert/strict";
-import { addressKey, evaluate, formatPostcode, pickDirector, toAddress, type RuleContext } from "../src/lib/pull/eligibility";
+import { addressKey, evaluate, formatPostcode, isCic, pickDirector, toAddress, type RuleContext } from "../src/lib/pull/eligibility";
 
 const ctx: RuleContext = {
   ownOffice: { line1: "18 Thricknells Close", postcode: "LU3 3RP" },
@@ -23,6 +23,20 @@ assert.equal(Object.values(r.eligibility).every(Boolean), true);
 
 r = evaluate({ ...base, companyType: "plc", address: good }, ctx);
 assert.deepEqual([r.state, r.skipReason], ["skipped", "company_type"]);
+
+// Ashley, 20 Nov 2026: companies limited by guarantee get a letter, CICs never do.
+r = evaluate({ ...base, name: "GREEN HOUSE TRUST LIMITED", companyType: "private-limited-guarant-nsc", address: good }, ctx);
+assert.equal(r.state, "not_reviewed");
+r = evaluate({ ...base, name: "OLD SCHOOL ASSOCIATION", companyType: "private-limited-guarant-nsc-limited-exemption", address: good }, ctx);
+assert.equal(r.state, "not_reviewed");
+r = evaluate({ ...base, name: "EDGE IMPACT CIC", companyType: "private-limited-guarant-nsc", companySubtype: "community-interest-company", address: good }, ctx);
+assert.deepEqual([r.state, r.skipReason], ["skipped", "company_type"]);
+r = evaluate({ ...base, name: "FOXGLOVE MEADOWS COMMUNITY CIC", companyType: "ltd", companySubtype: "community-interest-company", address: good }, ctx);
+assert.deepEqual([r.state, r.skipReason], ["skipped", "company_type"], "a CIC limited by shares is still a CIC");
+r = evaluate({ ...base, name: "RIVERSIDE ARTS C.I.C.", companyType: "ltd", address: good }, ctx);
+assert.deepEqual([r.state, r.skipReason], ["skipped", "company_type"], "CIC by name when the subtype is missing");
+for (const n of ["NORTHERN LIGHTS COMMUNITY INTEREST COMPANY", "Y GEGIN CBC", "Menter Iaith Cwmni Buddiant Cymunedol", "ABC CIC"]) assert.ok(isCic({ name: n }), n);
+for (const n of ["MAGIC LTD", "ARCTIC SOLUTIONS LIMITED", "CIC HOLDINGS LTD", "PUBLIC LTD"]) assert.ok(!isCic({ name: n }), n);
 
 r = evaluate({ ...base, address: toAddress({ address_line_1: "71-75, Shelton Street", locality: "London", postal_code: "wc2h 9jq" }) }, ctx);
 assert.deepEqual([r.state, r.skipReason], ["skipped", "not_shared_address"]);

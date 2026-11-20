@@ -310,6 +310,7 @@ async function applyRules(window: { from: string; to: string }, pullId: string) 
       number: companies.companyNumber,
       name: companies.name,
       type: companies.companyType,
+      subtype: sql<string | null>`${companies.raw}->>'company_subtype'`,
       address: companies.registeredOffice,
     })
     .from(companies)
@@ -320,7 +321,7 @@ async function applyRules(window: { from: string; to: string }, pullId: string) 
 
   for (let i = 0; i < pending.length; i += 500) {
     const chunk = pending.slice(i, i + 500).map((p) => {
-      const r = evaluate({ companyNumber: p.number, name: p.name, companyType: p.type, address: p.address }, ctx);
+      const r = evaluate({ companyNumber: p.number, name: p.name, companyType: p.type, companySubtype: p.subtype, address: p.address }, ctx);
       return { id: p.id, ...r };
     });
     const values = sql.join(

@@ -1,9 +1,9 @@
 import "server-only";
-import { and, count, desc, eq, gte, ilike, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { activityEvents, companies, exclusions, pulls, users } from "@/lib/db/schema";
 import { addDays, dateInTz, UK_TZ } from "@/lib/pull/dates";
-import { RULES } from "@/lib/pull/eligibility";
+import { GUARANTEE_TYPES, RULES } from "@/lib/pull/eligibility";
 import { companyTypeLabel, formatAddress, formatCompanyName, formatDate, postingAddress, SIC_SECTIONS, sicLabel } from "./format";
 
 /* ================================================================== */
@@ -23,7 +23,7 @@ const VIEW_STATES: Record<Exclude<View, "all">, Array<typeof companies.$inferSel
 };
 
 export const INCORPORATED = ["since-last", "7d", "30d", "all"] as const;
-export const TYPES = ["all", "ltd", "llp", "other"] as const;
+export const TYPES = ["all", "ltd", "llp", "guarantee", "other"] as const;
 export const LOCATIONS = ["all", "england", "wales", "scotland", "northern-ireland"] as const;
 export const PER_PAGE = [25, 50, 100] as const;
 
@@ -86,7 +86,8 @@ async function baseConditions(f: Omit<FeedFilters, "view" | "page" | "per">): Pr
   else if (f.inc === "30d") where.push(gte(companies.incorporatedOn, addDays(ukToday, -30)));
 
   if (f.type === "ltd" || f.type === "llp") where.push(eq(companies.companyType, f.type));
-  else if (f.type === "other") where.push(sql`${companies.companyType} NOT IN ('ltd','llp')`);
+  else if (f.type === "guarantee") where.push(inArray(companies.companyType, GUARANTEE_TYPES));
+  else if (f.type === "other") where.push(notInArray(companies.companyType, ["ltd", "llp", ...GUARANTEE_TYPES]));
 
   const section = SIC_SECTIONS.find((s) => s.key === f.sic);
   if (section) {
