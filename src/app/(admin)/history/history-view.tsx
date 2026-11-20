@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { faChevronLeft, faChevronRight, faMagnifyingGlass, faRotateRight, faSpinner, faTag } from "@fortawesome/free-solid-svg-icons";
+import { faCalendar, faChevronLeft, faChevronRight, faFileCsv, faFilter, faMagnifyingGlass, faRotateRight, faSpinner, faTag } from "@fortawesome/free-solid-svg-icons";
+import { FilterDropdown } from "@/components/admin/filter-dropdown";
 import { PageHeader } from "@/components/admin/page-header";
 import { DataRow, DataTable } from "@/components/admin/table";
 import { LabelsModal, ReprintModal, usePrintFlow, type FlowRun } from "@/components/admin/print-parts";
@@ -15,6 +16,7 @@ import { Modal } from "@/components/ui/modal";
 import { BoxedTabs } from "@/components/ui/tabs";
 import { getRunDetailAction } from "@/lib/print/actions";
 import type { historyExcluded, historyNotSent, historySent, RunSummary } from "@/lib/print/queries";
+import { DEFAULT_HISTORY_RANGE, HISTORY_RANGES, type HistoryFilter } from "@/lib/history/filter";
 import { cn } from "@/lib/cn";
 
 export type HistoryTab = "sent" | "excluded" | "not-sent" | "print-runs";
@@ -40,7 +42,25 @@ const STATE: Record<string, { tone: Tone; label: string }> = {
 };
 const fmt = (n: number) => n.toLocaleString("en-GB");
 
-export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryTab; q: string; page: number; per: number; counts: Counts; data: Data }) {
+export function HistoryView({
+  tab,
+  filter,
+  towns,
+  page,
+  per,
+  counts,
+  data,
+}: {
+  tab: HistoryTab;
+  filter: HistoryFilter;
+  towns: string[];
+  page: number;
+  per: number;
+  counts: Counts;
+  data: Data;
+}) {
+  const q = filter.q;
+  const filtered = Boolean(q || filter.town);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -53,7 +73,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
   const href = (patch: Record<string, string | number | null>) => {
     const sp = new URLSearchParams(searchParams.toString());
     for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === "" || (k === "page" && v === 1) || (k === "tab" && v === "sent")) sp.delete(k);
+      if (v === null || v === "" || (k === "page" && v === 1) || (k === "tab" && v === "sent") || (k === "range" && v === DEFAULT_HISTORY_RANGE)) sp.delete(k);
       else sp.set(k, String(v));
     }
     return sp.size ? `${pathname}?${sp}` : pathname;
@@ -66,6 +86,9 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
+  const townOptions = filter.town && !towns.some((t) => t.toLowerCase() === filter.town.toLowerCase()) ? [filter.town, ...towns] : towns;
+  const exportHref = `/api/history/export?${new URLSearchParams({ tab, q, town: filter.town, range: filter.range })}`;
+
   const rowsShown =
     tab === "sent" ? data.sent.length : tab === "excluded" ? data.excluded.length : tab === "not-sent" ? data.notSent.length : data.runs.length;
   const totalForTab = tab === "sent" ? counts.sent : tab === "excluded" ? counts.excluded : tab === "not-sent" ? counts.notSent : counts.printRuns;
@@ -73,19 +96,32 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
   const footer = (label: string) => (
     <>
       <span className="text-[12px] text-muted">
-        {rowsShown ? `${fmt((page - 1) * per + 1)}–${fmt((page - 1) * per + rowsShown)} ${q ? `matching “${q}”` : `of ${fmt(totalForTab)}`} ${label}` : `No ${label}`}
+        {rowsShown ? `${fmt((page - 1) * per + 1)}–${fmt((page - 1) * per + rowsShown)} of ${fmt(totalForTab)} ${label}` : `No ${label}`}
       </span>
       <nav aria-label="Pagination" className="ml-auto flex items-center gap-1 text-[12px] font-medium">
         <PageLink disabled={page <= 1} href={href({ page: page - 1 })} label="Previous page" icon={faChevronLeft} />
         <span className="px-2 text-ink">Page {page}</span>
-        <PageLink disabled={rowsShown < per} href={href({ page: page + 1 })} label="Next page" icon={faChevronRight} />
+        <PageLink disabled={(page - 1) * per + rowsShown >= totalForTab} href={href({ page: page + 1 })} label="Next page" icon={faChevronRight} />
       </nav>
     </>
   );
 
   return (
     <>
-      <PageHeader title="History" description="Every company you’ve sent a letter to, excluded, or not sent to yet." />
+      <PageHeader
+        title="History"
+        description="Every company you’ve sent a letter to, excluded, or not sent to yet."
+        actions={
+          <a
+            href={exportHref}
+            download
+            className="inline-flex h-11 items-center gap-2 rounded-[10px] border border-line bg-white px-4 text-[13px] font-semibold text-ink transition-colors hover:border-n400"
+          >
+            <Icon icon={faFileCsv} size={13} />
+            Export CSV
+          </a>
+        }
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
@@ -98,6 +134,27 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           className="h-10 w-full max-w-[360px]"
           inputClassName="text-[13px]"
         />
+        <FilterDropdown
+          className="w-[180px]"
+          variant="inline"
+          icon={faFilter}
+          label="Town"
+          value={filter.town}
+          onChange={(v) => router.replace(href({ town: v || null, page: null }), { scroll: false })}
+          options={[{ value: "", label: "All towns" }, ...townOptions]}
+          searchPlaceholder="Search towns"
+        />
+        <FilterDropdown
+          className="w-[170px]"
+          variant="inline"
+          icon={faCalendar}
+          label="Date range"
+          value={filter.range}
+          onChange={(v) => router.replace(href({ range: v, page: null }), { scroll: false })}
+          options={HISTORY_RANGES}
+          footnote={tab === "not-sent" ? "Not sent: by incorporation date." : tab === "excluded" ? "Excluded: by the date they were excluded." : "By the date the letters were printed."}
+        />
+        <span className="ml-auto text-[12px] text-muted">Kept for 12 months</span>
       </div>
 
       <BoxedTabs
@@ -131,7 +188,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("letters sent")}
         >
           {data.sent.length === 0 ? (
-            <Empty text={q ? "Nothing matches that search." : "No letters printed yet. They appear here after a print run."} />
+            <Empty text={filtered ? "Nothing matches these filters." : "No letters printed in this period — try a longer date range."} />
           ) : (
             data.sent.map((r, i) => (
               <DataRow key={`${r.number}-${r.runId}`} index={i}>
@@ -180,7 +237,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("excluded")}
         >
           {data.excluded.length === 0 ? (
-            <Empty text={q ? "Nothing matches that search." : "Nobody is on the do-not-contact list."} />
+            <Empty text={filtered ? "Nothing matches these filters." : "Nobody was excluded in this period."} />
           ) : (
             data.excluded.map((r, i) => (
               <DataRow key={`${r.number}-${i}`} index={i}>
@@ -218,7 +275,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("not sent")}
         >
           {data.notSent.length === 0 ? (
-            <Empty text={q ? "Nothing matches that search." : "Every company has had a letter or was excluded."} />
+            <Empty text={filtered ? "Nothing matches these filters." : "Every company from this period has had a letter or was excluded."} />
           ) : (
             data.notSent.map((c, i) => (
               <DataRow key={c.number} index={i}>
@@ -260,7 +317,7 @@ export function HistoryView({ tab, q, page, per, counts, data }: { tab: HistoryT
           footer={footer("print runs")}
         >
           {data.runs.length === 0 ? (
-            <Empty text={q ? "No print runs match that search." : "No print runs yet."} />
+            <Empty text={filtered ? "No print runs match these filters." : "No print runs in this period."} />
           ) : (
             data.runs.map((r, i) => (
               <DataRow key={r.id} index={i}>

@@ -164,6 +164,23 @@ export function usePrintFlow(deepLink: FlowDeepLink = null) {
     });
   };
 
+  /** "Print letter now" (company Letters tab) — a run with just this company, then the same confirm step. */
+  const printOne = (companyNumber: string) => {
+    const go = openTab();
+    start(async () => {
+      const r = await createRunAction({ companyNumber });
+      if (!r.ok) {
+        go("about:blank");
+        toast({ message: r.message });
+        return;
+      }
+      go(`/print-doc/${r.runId}/letters?auto=1`);
+      setRun({ id: r.runId, reference: r.reference, letters: r.letters, template: r.template });
+      setModal("confirm");
+      router.refresh();
+    });
+  };
+
   const reprint = (r: FlowRun, from?: number, to?: number) => {
     const qs = new URLSearchParams({ auto: "1", ...(from ? { from: String(from) } : {}), ...(to ? { to: String(to) } : {}) });
     window.open(`/print-doc/${r.id}/letters?${qs}`, "_blank");
@@ -205,6 +222,7 @@ export function usePrintFlow(deepLink: FlowDeepLink = null) {
   return {
     pending,
     printQueue,
+    printOne,
     reprint,
     openConfirm: (r: FlowRun) => (setRun(r), setModal("confirm")),
     openLabels: (r: FlowRun) => (setRun(r), setModal("labels")),
@@ -235,7 +253,7 @@ export function ConfirmPrintedModal({
       onClose={onClose}
       width={560}
       icon={faPrint}
-      title={`Did all ${run?.letters ?? ""} letters print correctly?`}
+      title={run?.letters === 1 ? "Did the letter print correctly?" : `Did all ${run?.letters ?? ""} letters print correctly?`}
       footer={
         <div className="ml-auto flex flex-wrap gap-3">
           <Button variant="secondary" icon={faRotateRight} onClick={onReprint} disabled={pending}>

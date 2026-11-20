@@ -140,3 +140,66 @@
     background: #fff;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Letter body — template editor and the printed letter share these    */
+/* (tags and classes allowed by src/lib/letters/html.ts). Sizes are in  */
+/* em so the editor (13px) and the A4 letter (8.94px) scale the same.   */
+/* ------------------------------------------------------------------ */
+.letter-body h2 {
+  font-size: 1.3em;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.letter-body h3 {
+  font-size: 1.1em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.letter-body a {
+  color: var(--color-brand);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+.letter-body img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.letter-body table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.letter-body th,
+.letter-body td {
+  border: 1px solid var(--color-line);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+.letter-body th {
+  background: var(--color-canvas);
+  font-weight: 600;
+}
+.letter-body hr {
+  border: 0;
+  border-top: 1px solid var(--color-line);
+}
+.letter-body .style-lead {
+  font-size: 1.15em;
+  font-weight: 500;
+}
+.letter-body .style-small {
+  font-size: 0.85em;
+  color: var(--color-muted);
+}
+.letter-body .style-note {
+  border-radius: 0.5em;
+  background: var(--color-mint);
+  padding: 0.6em 0.9em;
+}
+/* Editor only: an empty table cell still needs room to click into. */
+.letter-body--editor td:empty::after,
+.letter-body--editor th:empty::after {
+  content: "\00a0";
+}

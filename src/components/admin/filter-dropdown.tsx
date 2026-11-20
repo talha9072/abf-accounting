@@ -25,6 +25,7 @@ export function FilterDropdown({
   footnote,
   variant = "stacked",
   className,
+  searchPlaceholder,
 }: {
   icon: IconDefinition;
   label: string;
@@ -35,8 +36,13 @@ export function FilterDropdown({
   footnote?: string;
   variant?: "stacked" | "inline";
   className?: string;
+  /** Long lists (e.g. towns): a search box above the options; the first option always stays. */
+  searchPlaceholder?: string;
 }) {
   const [internal, setInternal] = useState(defaultValue ?? val(options[0]));
+  const [term, setTerm] = useState("");
+  const needle = term.trim().toLowerCase();
+  const shownOptions = needle ? options.filter((o, i) => i === 0 || lab(o).toLowerCase().includes(needle)) : options;
   const value = controlled ?? internal;
   const current = options.find((o) => val(o) === value) ?? options[0];
   const shown = lab(current).replace(" (default)", "");
@@ -75,8 +81,20 @@ export function FilterDropdown({
       )}
     >
       {(close) => (
-        <div role="listbox" aria-label={label} className="flex flex-col gap-0.5">
-          {options.map((opt) => {
+        <div className="flex flex-col gap-0.5">
+          {searchPlaceholder ? (
+            <input
+              type="search"
+              value={term}
+              autoFocus
+              onChange={(e) => setTerm(e.target.value)}
+              placeholder={searchPlaceholder}
+              aria-label={searchPlaceholder}
+              className="mb-1 h-9 rounded-lg border border-line bg-white px-3 text-[13px] text-ink outline-none focus:border-brand focus:ring-[3px] focus:ring-brand/15"
+            />
+          ) : null}
+          <div role="listbox" aria-label={label} className="flex flex-col gap-0.5">
+          {shownOptions.map((opt) => {
             const v = val(opt);
             const selected = v === value;
             return (
@@ -88,6 +106,7 @@ export function FilterDropdown({
                 onClick={() => {
                   if (controlled === undefined) setInternal(v);
                   onChange?.(v);
+                  setTerm("");
                   close();
                 }}
                 className={cn(
@@ -100,6 +119,8 @@ export function FilterDropdown({
               </button>
             );
           })}
+          {needle && shownOptions.length === 1 ? <p className="px-3 py-2 text-[12px] text-muted">No match</p> : null}
+          </div>
           {footnote ? <p className="px-3 pb-1 pt-2 text-[11px] leading-[15px] text-muted">{footnote}</p> : null}
         </div>
       )}

@@ -3,7 +3,7 @@
  *   npx tsx scripts/test-letters.ts
  */
 import assert from "node:assert/strict";
-import { sanitizeTemplateHtml } from "../src/lib/letters/html";
+import { safeHref, safeImageSrc, sanitizeTemplateHtml } from "../src/lib/letters/html";
 import { letterRecipient, mergeCodes, mergeGreeting, type MergeValues } from "../src/lib/letters/merge";
 import { letterFooterLines } from "../src/lib/letters/footer";
 
@@ -55,6 +55,35 @@ assert.equal(
   mergeCodes("<p>Congratulations ##COMPANY_NAME#</p>", values),
   "<p>Congratulations Tom &amp; Jerry &lt;script&gt;alert(1)&lt;/script&gt; Ltd</p>",
 );
+
+// Links: web, email and phone only; the href is rebuilt, nothing else survives.
+assert.equal(s('<a href="https://abfaccounting.com/x?a=1&amp;b=2" onclick="x()" target="_blank">site</a>'), '<a href="https://abfaccounting.com/x?a=1&amp;b=2">site</a>');
+assert.equal(s('<a href="mailto:support@abfaccounting.com">mail</a>'), '<a href="mailto:support@abfaccounting.com">mail</a>');
+assert.equal(s('<a href="tel:+442039689444">call</a>'), '<a href="tel:+442039689444">call</a>');
+assert.equal(s('<a href="JaVaScRiPt:alert(1)">x</a> <a href="data:text/html,hi">y</a> <a href="/relative">z</a>'), "x y z");
+assert.equal(s('<a href="https://x.com" "onmouseover=alert(1)">a</a>'), '<a href="https://x.com">a</a>');
+assert.equal(s('<a>no href</a>'), "no href");
+assert.equal(safeHref("https://abfaccounting.com/?ref=##REFERENCE#"), "https://abfaccounting.com/?ref=##REFERENCE#");
+assert.equal(safeHref("javascript:alert(1)"), null);
+assert.equal(safeHref("https://javascript:alert(1)"), null);
+assert.equal(safeHref("mailto:a@b"), null);
+assert.equal(safeHref("https://abfaccounting.com"), "https://abfaccounting.com");
+assert.equal(safeImageSrc("https://x/a.png"), null);
+assert.equal(safeHref("https://x.com/\" onerror=1"), null);
+// Images: https only, alt escaped, width capped.
+assert.equal(s('<img src="https://abfaccounting.com/logo.png" alt="ABF &quot;logo&quot;" width="200" onerror="x()">'), '<img src="https://abfaccounting.com/logo.png" alt="ABF &quot;logo&quot;" width="200">');
+assert.equal(s('<img src="http://abfaccounting.com/logo.png">'), "");
+assert.equal(s('<img src="data:image/png;base64,AAAA">'), "");
+assert.equal(s('<img src="https://x.com/a.png" width="9999">'), '<img src="https://x.com/a.png" alt="">');
+assert.equal(safeImageSrc("https://x.com/a.png"), "https://x.com/a.png");
+assert.equal(safeImageSrc("javascript:alert(1)"), null);
+// Tables and headings (h1 → heading, h4–h6 → subheading).
+assert.equal(s('<table border="1" style="x"><tbody><tr><td class="x">A</td><th>B</th></tr></tbody></table>'), "<table><tbody><tr><td>A</td><th>B</th></tr></tbody></table>");
+assert.equal(s("<h1>Title</h1><h4>Sub</h4><h2></h2>"), "<h2>Title</h2><h3>Sub</h3>");
+// Paragraph styles: one allowed style plus an indent, nothing else.
+assert.equal(s('<p class="style-lead indent-2 evil">x</p>'), '<p class="indent-2 style-lead">x</p>');
+assert.equal(s('<p class="style-note">x</p><p class="style-evil">y</p>'), '<p class="style-note">x</p><p>y</p>');
+
 // Layout codes are removed, unknown codes stay visible for the preview.
 assert.equal(mergeCodes("##LETTER_HEAD#<p>x ##NOT_A_CODE#</p>##LETTER_FOOTER#", values), "<p>x ##NOT_A_CODE#</p>");
 // Greeting fallback when Companies House has no director name.

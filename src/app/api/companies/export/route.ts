@@ -5,6 +5,7 @@ import { companies, printRunItems, printRuns } from "@/lib/db/schema";
 import { formatAddress, formatCompanyName, postingAddress, sicDescription } from "@/lib/companies/format";
 import { matchingCompanyNumbers, parseFeedFilters } from "@/lib/companies/queries";
 import { dateInTz, UK_TZ } from "@/lib/pull/dates";
+import { csvCell as cell } from "@/lib/csv";
 
 const STATE_LABEL: Record<string, string> = {
   not_reviewed: "Not reviewed",
@@ -15,13 +16,6 @@ const STATE_LABEL: Record<string, string> = {
   address_issue: "Address issue",
   skipped: "Skipped",
 };
-
-/** CSV cell: quoted, and neutralised against spreadsheet formula injection. */
-function cell(v: unknown) {
-  let s = v == null ? "" : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return `"${s.replace(/"/g, '""')}"`;
-}
 
 /** Export the New Companies list (current filters or selected rows) as CSV. */
 export async function POST(req: Request) {

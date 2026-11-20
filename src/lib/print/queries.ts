@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, exists, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, exists, gte, ilike, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { companies, exclusions, printRunItems, printRuns, users, type LetterSnapshot } from "@/lib/db/schema";
 import { cache } from "react";
@@ -7,6 +7,9 @@ import { formatAddress, formatCompanyName, formatDate, postingAddress } from "@/
 import { buildLetterSnapshot, getBusiness, getPrintableTemplate, renderLetter } from "@/lib/letters/data";
 import { dateInTz, formatSaTime, SCHEDULE_TZ, UK_TZ } from "@/lib/pull/dates";
 import { MAX_RUN_LETTERS } from "./limits";
+import { historySince, type HistoryFilter } from "@/lib/history/filter";
+
+export { parseHistoryFilter, type HistoryFilter } from "@/lib/history/filter";
 
 const who = (first: string | null, last: string | null) => (first ? `${first} ${last ?? ""}`.trim() : "—");
 
@@ -169,9 +172,18 @@ export async function getOpenRuns() {
   return rows.map(toRunSummary);
 }
 
+/* ------------------------------------------------------------------ */
+/* History (Figma "History / Desktop / Working v2")                    */
+/* ------------------------------------------------------------------ */
+
 /** `%term%` for ILIKE, with the user's own % _ \ escaped. */
 const contains = (q: string) => `%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 const numberPrefix = (q: string) => `${q.replace(/\s+/g, "").replace(/[%_\\]/g, (c) => `\\${c}`).toUpperCase()}%`;
+/** Town as compared: trimmed, lower case ("LONDON " = "London"). */
+const townKey = (t: string) => t.trim().toLowerCase();
+/** The town a letter goes to: the fixed posting address if there is one, else the registered office. */
+const companyTown = sql`lower(trim(coalesce(${companies.postingAddress}->>'town', ${companies.registeredOffice}->>'town')))`;
+const snapshotTown = sql`lower(trim(${printRunItems.addressSnapshot}->>'town'))`;
 
 /** Runs matching a reference (PR-0811-01), template name, or a company name / number inside the run. */
 function runSearch(q: string) {
@@ -184,12 +196,34 @@ function runSearch(q: string) {
   return or(ilike(printRuns.reference, contains(q)), ilike(printRuns.templateName, contains(q)), exists(inRun));
 }
 
-export async function listRuns(limit = 50, offset = 0, q = "") {
+/** Runs with at least one letter going to the town. */
+function runTown(town: string) {
+  if (!town) return undefined;
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(printRunItems)
+      .where(and(eq(printRunItems.printRunId, printRuns.id), sql`${snapshotTown} = ${townKey(town)}`)),
+  );
+}
+
+type RunFilter = { q?: string; town?: string; since?: Date | null };
+
+function runWhere(f: RunFilter) {
+  return and(
+    sql`${printRuns.status} <> 'cancelled'`,
+    runSearch(f.q ?? ""),
+    runTown(f.town ?? ""),
+    f.since ? sql`coalesce(${printRuns.printedAt}, ${printRuns.createdAt}) >= ${f.since}` : undefined,
+  );
+}
+
+export async function listRuns(limit = 50, offset = 0, f: RunFilter = {}) {
   const rows = await db
     .select(runSelect)
     .from(printRuns)
     .leftJoin(users, eq(printRuns.printedBy, users.id))
-    .where(and(sql`${printRuns.status} <> 'cancelled'`, runSearch(q)))
+    .where(runWhere(f))
     .orderBy(desc(printRuns.printedAt))
     .limit(limit)
     .offset(offset);
@@ -218,38 +252,65 @@ export async function getRun(id: string) {
 
 export type RunDetail = NonNullable<Awaited<ReturnType<typeof getRun>>>;
 
-/* ------------------------------------------------------------------ */
-/* History                                                             */
-/* ------------------------------------------------------------------ */
-
-/** Tab counters — while searching they count only what matches, like the tables. */
-export async function historyCounts(q = "") {
-  const [states, [runs]] = await Promise.all([
-    db
-      .select({ s: companies.letterState, n: count() })
-      .from(companies)
-      .where(and(isNotNull(companies.eligibility), search(q)))
-      .groupBy(companies.letterState),
-    db
-      .select({ n: count() })
-      .from(printRuns)
-      .where(and(sql`${printRuns.status} <> 'cancelled'`, runSearch(q))),
-  ]);
-  const get = (...s: string[]) => states.filter((x) => s.includes(x.s)).reduce((t, x) => t + x.n, 0);
-  return {
-    sent: get("posted", "printed"),
-    excluded: get("excluded"),
-    notSent: get("not_reviewed", "added", "address_issue", "skipped"),
-    printRuns: runs?.n ?? 0,
-  };
-}
-
 function search(q: string) {
   if (!q) return undefined;
   return or(ilike(companies.name, contains(q)), ilike(companies.companyNumber, numberPrefix(q)));
 }
 
-export async function historySent(q: string, limit = 50, offset = 0) {
+function sentWhere(f: HistoryFilter) {
+  return and(
+    sql`${printRuns.status} <> 'cancelled'`,
+    inArray(companies.letterState, ["printed", "posted"]),
+    search(f.q),
+    f.town ? sql`${snapshotTown} = ${townKey(f.town)}` : undefined,
+    sql`coalesce(${printRuns.printedAt}, ${printRuns.createdAt}) >= ${historySince(f.range)}`,
+  );
+}
+
+function excludedWhere(f: HistoryFilter) {
+  // Exclusions by name only have no address, so a town filter leaves them out.
+  const inTown = f.town
+    ? exists(
+        db
+          .select({ one: sql`1` })
+          .from(companies)
+          .where(and(eq(companies.companyNumber, exclusions.companyNumber), sql`${companyTown} = ${townKey(f.town)}`)),
+      )
+    : undefined;
+  return and(
+    f.q ? or(ilike(exclusions.companyName, contains(f.q)), ilike(exclusions.companyNumber, numberPrefix(f.q))) : undefined,
+    inTown,
+    gte(exclusions.createdAt, historySince(f.range)),
+  );
+}
+
+function notSentWhere(f: HistoryFilter) {
+  return and(
+    isNotNull(companies.eligibility),
+    inArray(companies.letterState, ["not_reviewed", "added", "address_issue", "skipped"]),
+    search(f.q),
+    f.town ? sql`${companyTown} = ${townKey(f.town)}` : undefined,
+    gte(companies.incorporatedOn, dateInTz(historySince(f.range), UK_TZ)),
+  );
+}
+
+/** Tab counters — they count exactly what each table shows with the same filters. */
+export async function historyCounts(f: HistoryFilter) {
+  const [[sent], [excluded], [notSent], [runs]] = await Promise.all([
+    db
+      .select({ n: count() })
+      .from(printRunItems)
+      .innerJoin(printRuns, eq(printRunItems.printRunId, printRuns.id))
+      .innerJoin(companies, eq(printRunItems.companyId, companies.id))
+      .where(sentWhere(f)),
+    db.select({ n: count() }).from(exclusions).where(excludedWhere(f)),
+    db.select({ n: count() }).from(companies).where(notSentWhere(f)),
+    db.select({ n: count() }).from(printRuns).where(runWhere({ q: f.q, town: f.town, since: historySince(f.range) })),
+  ]);
+  return { sent: sent?.n ?? 0, excluded: excluded?.n ?? 0, notSent: notSent?.n ?? 0, printRuns: runs?.n ?? 0 };
+}
+
+export async function historySent(f: HistoryFilter, limit = 50, offset = 0) {
   const rows = await db
     .select({
       number: companies.companyNumber,
@@ -268,7 +329,7 @@ export async function historySent(q: string, limit = 50, offset = 0) {
     .innerJoin(printRuns, eq(printRunItems.printRunId, printRuns.id))
     .innerJoin(companies, eq(printRunItems.companyId, companies.id))
     .leftJoin(users, eq(printRuns.printedBy, users.id))
-    .where(and(sql`${printRuns.status} <> 'cancelled'`, inArray(companies.letterState, ["printed", "posted"]), search(q)))
+    .where(sentWhere(f))
     .orderBy(desc(printRuns.printedAt), asc(printRunItems.position))
     .limit(limit)
     .offset(offset);
@@ -286,7 +347,7 @@ export async function historySent(q: string, limit = 50, offset = 0) {
   }));
 }
 
-export async function historyExcluded(q: string, limit = 50, offset = 0) {
+export async function historyExcluded(f: HistoryFilter, limit = 50, offset = 0) {
   const rows = await db
     .select({
       number: exclusions.companyNumber,
@@ -298,7 +359,7 @@ export async function historyExcluded(q: string, limit = 50, offset = 0) {
     })
     .from(exclusions)
     .leftJoin(users, eq(exclusions.createdBy, users.id))
-    .where(q ? or(ilike(exclusions.companyName, contains(q)), ilike(exclusions.companyNumber, numberPrefix(q))) : undefined)
+    .where(excludedWhere(f))
     .orderBy(desc(exclusions.createdAt))
     .limit(limit)
     .offset(offset);
@@ -311,7 +372,7 @@ export async function historyExcluded(q: string, limit = 50, offset = 0) {
   }));
 }
 
-export async function historyNotSent(q: string, limit = 50, offset = 0) {
+export async function historyNotSent(f: HistoryFilter, limit = 50, offset = 0) {
   const rows = await db
     .select({
       number: companies.companyNumber,
@@ -324,7 +385,7 @@ export async function historyNotSent(q: string, limit = 50, offset = 0) {
       skipReason: companies.skipReason,
     })
     .from(companies)
-    .where(and(isNotNull(companies.eligibility), inArray(companies.letterState, ["not_reviewed", "added", "address_issue", "skipped"]), search(q)))
+    .where(notSentWhere(f))
     .orderBy(desc(companies.incorporatedOn), desc(companies.companyNumber))
     .limit(limit)
     .offset(offset);
@@ -337,6 +398,22 @@ export async function historyNotSent(q: string, limit = 50, offset = 0) {
     state: r.state,
     skipReason: r.skipReason,
   }));
+}
+
+export function historyRuns(f: HistoryFilter, limit = 50, offset = 0) {
+  return listRuns(limit, offset, { q: f.q, town: f.town, since: historySince(f.range) });
+}
+
+/** Towns for the filter: where letters go in the last 12 months, busiest first (max 300), then A–Z. */
+export async function historyTowns(): Promise<string[]> {
+  const rows = await db
+    .select({ town: sql<string>`initcap(min(${companyTown}))`, n: count() })
+    .from(companies)
+    .where(and(isNotNull(companies.eligibility), gte(companies.incorporatedOn, dateInTz(historySince("12m"), UK_TZ)), sql`${companyTown} <> ''`))
+    .groupBy(companyTown)
+    .orderBy(desc(count()))
+    .limit(300);
+  return rows.map((r) => r.town).sort((a, b) => a.localeCompare(b, "en-GB"));
 }
 
 /* ------------------------------------------------------------------ */

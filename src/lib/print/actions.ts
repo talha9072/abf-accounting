@@ -28,14 +28,22 @@ async function nextReference(now: Date) {
   return { base, seq: (r?.n ?? 0) + 1 };
 }
 
+/** States a company can be printed from: in the print run, or (Print letter now) not reviewed yet. */
+const PRINTABLE = ["added", "not_reviewed"] as const;
+
 /**
- * Create a print run from every company currently "Added to print run":
- * freezes each merged letter, marks the companies "Printed" (so they can't
- * be printed twice) and returns the run to open the print document.
+ * Create a print run from every company currently "Added to print run" — or, with
+ * `companyNumber` (company Letters tab · "Print letter now"), from that one company.
+ * Freezes each merged letter, marks the companies "Printed" (so they can't be printed
+ * twice) and returns the run to open the print document.
  */
-export async function createRunAction(input: { templateId?: string | null }): Promise<RunResult> {
+export async function createRunAction(input: { templateId?: string | null; companyNumber?: string }): Promise<RunResult> {
   const user = await auth();
   if (!user) return { ok: false, message: "Please sign in again." };
+
+  const one = typeof input.companyNumber === "string" ? input.companyNumber.trim().toUpperCase() : null;
+  if (one !== null && !/^[A-Z0-9]{6,10}$/.test(one)) return { ok: false, message: "Unknown company." };
+  const states: ("added" | "not_reviewed")[] = one ? [...PRINTABLE] : ["added"];
 
   const queue = await db
     .select({
@@ -49,10 +57,15 @@ export async function createRunAction(input: { templateId?: string | null }): Pr
       postingAddress: companies.postingAddress,
     })
     .from(companies)
-    .where(eq(companies.letterState, "added"))
+    .where(and(inArray(companies.letterState, states), one ? eq(companies.companyNumber, one) : undefined))
     .orderBy(companies.incorporatedOn, companies.companyNumber)
-    .limit(MAX_LETTERS);
-  if (queue.length === 0) return { ok: false, message: "No companies in the print run. Add some on New Companies first." };
+    .limit(one ? 1 : MAX_LETTERS);
+  if (queue.length === 0) {
+    return {
+      ok: false,
+      message: one ? "This company can’t get a letter now — it was printed, excluded or skipped." : "No companies in the print run. Add some on New Companies first.",
+    };
+  }
 
   const tpl = await getPrintableTemplate(input.templateId && uuid.safeParse(input.templateId).success ? input.templateId : null);
   const business = await getBusiness();
@@ -69,12 +82,12 @@ export async function createRunAction(input: { templateId?: string | null }): Pr
         reference = `${base}-${String(seq + i).padStart(2, "0")}`;
       }
 
-      // Lock the rows and re-check they are still "added" (two people printing at once).
+      // Lock the rows and re-check they are still printable (two people printing at once).
       const ids = queue.map((q) => q.id);
       const locked = await tx
         .update(companies)
         .set({ letterState: "printed", updatedAt: now })
-        .where(and(inArray(companies.id, ids), eq(companies.letterState, "added")))
+        .where(and(inArray(companies.id, ids), inArray(companies.letterState, states)))
         .returning({ id: companies.id });
       const lockedIds = new Set(locked.map((l) => l.id));
       const batch = queue.filter((q) => lockedIds.has(q.id));

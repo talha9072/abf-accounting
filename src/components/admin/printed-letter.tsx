@@ -118,7 +118,7 @@ export function PrintedLetter({
         <div className="mt-[21px] flex flex-col gap-[10.35px] text-[8.94px] leading-[1.5]">
           <p className="text-[9.41px] font-semibold">{v.greeting}</p>
           <div
-            className="flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_.indent-1]:pl-[16px] [&_.indent-2]:pl-[32px] [&_.indent-3]:pl-[48px] [&_li]:ml-3 [&_ol]:list-decimal [&_s]:line-through [&_ul]:list-disc"
+            className="letter-body flex flex-col gap-[10.35px] [&_blockquote]:border-l-2 [&_blockquote]:border-line [&_blockquote]:pl-2 [&_.indent-1]:pl-[16px] [&_.indent-2]:pl-[32px] [&_.indent-3]:pl-[48px] [&_li]:ml-3 [&_ol]:list-decimal [&_s]:line-through [&_ul]:list-disc"
             dangerouslySetInnerHTML={{ __html: v.bodyHtml }}
           />
         </div>

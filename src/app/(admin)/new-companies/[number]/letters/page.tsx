@@ -8,6 +8,7 @@ import { buildLetterSnapshot, getBusiness, getPrintableTemplate, renderLetter } 
 import { companyLetters } from "@/lib/print/queries";
 import { dateInTz, UK_TZ } from "@/lib/pull/dates";
 import { requireCompany, runBadge } from "../data";
+import { PrintLetterNow } from "./print-now";
 
 export const metadata: Metadata = { title: "Letters" };
 
@@ -44,11 +45,15 @@ export default async function CompanyLettersPage({ params }: PageProps<"/new-com
         <CardHeader
           title="Letters"
           aside={
-            letters.length ? (
-              <span className="text-[11px] font-medium text-muted">
-                {letters.length} {letters.length === 1 ? "print run" : "print runs"}
-              </span>
-            ) : null
+            <div className="flex items-center gap-3">
+              {letters.length ? (
+                <span className="text-[11px] font-medium text-muted">
+                  {letters.length} {letters.length === 1 ? "print run" : "print runs"}
+                </span>
+              ) : null}
+              {/* Always mounted: after printing, the page refreshes and the “Did it print?” step must stay open. */}
+              <PrintLetterNow companyNumber={c.number} canPrint={canGetLetter} />
+            </div>
           }
         />
         {letters.length === 0 ? (
@@ -59,9 +64,9 @@ export default async function CompanyLettersPage({ params }: PageProps<"/new-com
             <p className="mt-1 text-[15px] font-bold leading-5 text-ink">No letter printed yet</p>
             <p className="text-[12px] leading-4 text-muted">
               {c.state === "added"
-                ? "It’s in today’s print run and will be printed with the next batch."
+                ? "It will be included in the next print run unless it’s skipped or excluded — or use Print letter now."
                 : canGetLetter
-                  ? "Add it to a print run from New Companies to send a letter."
+                  ? "Add it to a print run from New Companies, or use Print letter now."
                   : c.state === "address_issue"
                     ? "Fix the posting address first — then it can go in a print run."
                     : "This company won’t get a letter."}

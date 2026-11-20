@@ -4,6 +4,7 @@ import { db, pool } from "@/lib/db";
 import { businessSettings, companies, exclusions, notifications, pulls, users } from "@/lib/db/schema";
 import { getOfficers, searchIncorporations, type ChSearchCompany } from "@/lib/companies-house/client";
 import { sendMail } from "@/lib/mail";
+import { purgeOldHistory } from "@/lib/history/retention";
 import { addDays, dateInTz, daysBetween, formatSaTime, todaysScheduleStart, UK_TZ } from "./dates";
 import { evaluate, normLine, pickDirector, SHARED_ADDRESS_THRESHOLD, SHARED_POSTCODE_THRESHOLD, toAddress, type RuleContext } from "./eligibility";
 
@@ -247,6 +248,9 @@ async function executePull(pullId: string, window: { from: string; to: string },
         : []),
     ]);
     console.info(`[pull] ${pullId} ok · ${window.from}→${window.to} · found ${found}, new ${added}, ready ${ready?.n ?? 0}`);
+
+    // History is kept for 12 months: clear older records once the day’s pull is in. Never fails the pull.
+    await purgeOldHistory().catch((err) => console.error("[history] retention clean-up failed:", err instanceof Error ? err.message : err));
   } catch (e) {
     const message = (e instanceof Error ? e.message : String(e)).slice(0, 500);
     console.error(`[pull] ${pullId} failed (attempt ${attempt}):`, message);

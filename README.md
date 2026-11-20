@@ -49,7 +49,7 @@ http://127.0.0.1:3000 instead — it's allowed in `next.config.ts` (`allowedDevO
 | `/print` | Print Letters · modals: Did all letters print?, Print address labels (`?labels=1`), Reprint run |
 | `/print/preview` | Print Preview (+ confirm modal, `?confirm=1`) |
 | `/letter-templates/[id]` (+ `/replace-codes`, `/settings`, `/versions`) | Letter Templates — Content / Replace codes / Settings / Version history · New template, Leave without saving, Insert replace code menu, toasts |
-| `/history?tab=sent\|excluded\|not-sent\|print-runs` | History · Print run details modal |
+| `/history?tab=sent\|excluded\|not-sent\|print-runs` | History — search, town and date-range filters, Export CSV (`/api/history/export`), “Kept for 12 months” · Print run details modal |
 | `/account` | My account (reads the real signed-in user) · Change password modal · Two-step sign-in set-up / turn off / new recovery codes |
 | `/sign-in/verify` | Two-step sign-in code (authenticator app or recovery code) |
 | `/settings` | Business settings — letterhead, footer, `##BRAND_…#` codes, reference prefix, QR link, own office for the pull (admins edit) |
@@ -101,10 +101,17 @@ Rate limit: 600 requests / 5 min per key — requests are spaced evenly (~1.9/s)
 4. **Did all letters print?** → *Yes* marks them *Sent* (with Undo); *Not yet* reprints. A run that is never confirmed stays as a banner on Print with **Confirm sent / Print again / Cancel run** (cancel puts the companies back in the print run).
 5. **Print labels** opens `/print-doc/{run}/labels` — A4, 2 × 6 labels of 98 × 46 mm, same order as the letters, with “start at label” for part-used sheets and a test sheet.
 6. **History → Print runs** shows every run; reprint all or a range (paper jam) without changing any dates.
+7. **Print letter now** (company → Letters tab) prints just that company’s letter as its own run (it must be Not reviewed or in the print run), then asks “Did the letter print?” like the main flow.
+
+## History
+
+Tabs Sent · Excluded · Not sent · Print runs, each filtered by search, town (posting address, else registered office) and date range (7 days / 30 days — default / 3 months / 12 months). Counters and **Export CSV** use exactly the same filters as the table.
+
+**Kept for 12 months:** after each successful morning pull, `src/lib/history/retention.ts` deletes print runs printed more than 12 months ago and companies incorporated more than 12 months ago (with their notes, activity and letters — not one still waiting in the print queue), plus activity and notifications older than 12 months. The **Excluded / do-not-contact list is never deleted**. `HISTORY_RETENTION_MONTHS` changes the period; `0` turns it off. Test: `npx tsx --conditions=react-server scripts/test-retention.ts` (local database only).
 
 ### Letter templates
 
-`/letter-templates` lists every template (default first). **Content** edits the letter text with a live preview filled in with a real company; replace codes are inserted from the chips or the menu, unknown codes are flagged. **Save changes** creates a new version (`v3.4 → v3.5`) only when the text changes. **Settings** holds name, status (Active / Draft / Archived), default, greeting, sign-off, signatory, offer and CTA — there is always exactly one Active default. **Version history** lets you view any version and restore it (as a new version). **New template** copies the current one or starts blank (as a Draft); **Duplicate** makes a copy. **Print a test letter** / **Preview** open `/print-doc/test/{id}` — nothing is recorded. Leaving with unsaved edits asks first.
+`/letter-templates` lists every template (default first). **Content** edits the letter text with a live preview filled in with a real company; replace codes are inserted from the chips or the menu, unknown codes are flagged. The toolbar (Figma: two rows, like eFiling) has undo/redo, bold/italic/strike/clear, lists, indent, quote, **link** (web, mailto:, tel:), **image** (public https:// address, three sizes), **table**, line, **special characters (Ω)**, **Styles** (Normal, Lead, Small print, Highlight box), **Format** (Paragraph, Heading, Subheading), **full screen**, **HTML source** and **help**. Everything is re-sanitised on save and print by `src/lib/letters/html.ts` (allow-list; links and images are rebuilt from checked values) — tests in `scripts/test-letters.ts`. The CSP allows `https:` images for this. **Save changes** creates a new version (`v3.4 → v3.5`) only when the text changes. **Settings** holds name, status (Active / Draft / Archived), default, greeting, sign-off, signatory, offer and CTA — there is always exactly one Active default. **Version history** lets you view any version and restore it (as a new version). **New template** copies the current one or starts blank (as a Draft); **Duplicate** makes a copy. **Print a test letter** / **Preview** open `/print-doc/test/{id}` — nothing is recorded. Leaving with unsaved edits asks first.
 
 Template HTML is reduced to an allow-list of formatting tags and every merged value is HTML-escaped (`src/lib/letters`). Checks: `npx tsx scripts/test-letters.ts`.
 
@@ -126,7 +133,7 @@ All schema changes are plain SQL files in **`/drizzle`** (`0000_init.sql`, …).
 2. Set `DATABASE_URL` (and `DATABASE_SSL=true` if your host requires TLS), `APP_URL=https://your-domain`, `ALLOWED_SIGNUP_DOMAINS`.
 3. Run `npm run db:migrate` from the server/CI — or run the `.sql` files in `/drizzle` in order with `psql`.
 4. Create the first admin by registering, then set `REGISTRATION_ENABLED=false`.
-5. Before launch: set the SMTP settings and `AUTH_ENCRYPTION_KEY` (32 random bytes, base64 — never change it later), remove `PULL_LIMIT`, serve over HTTPS, and make sure your proxy sets `X-Forwarded-For`.
+5. Before launch: set the SMTP settings and `AUTH_ENCRYPTION_KEY` (32 random bytes, base64 — never change it later), remove `PULL_LIMIT`, keep `HISTORY_RETENTION_MONTHS=12`, serve over HTTPS, and make sure your proxy sets `X-Forwarded-For`.
 6. Open **Business settings** and check your details (they go on every letter and drive the "not your own office" rule).
 
 Never run `npm run db:seed` in production (it refuses to).
