@@ -46,7 +46,7 @@ async function main() {
     );
     await client.query(
       `INSERT INTO business_settings (id, brand_name, address_line, support_telephone, support_email, website, reference_prefix, registration_line)
-       VALUES (1, 'ABF Accounting Services Ltd', '18 Thricknells Close, Luton, LU3 3RP', '+44 7405 141694', 'support@abfaccounting.com',
+       VALUES (1, 'ABF Accounting Services Ltd', '18 Thricknells Close, Luton, LU3 3RP', '+44 20 3968 9444', 'support@abfaccounting.com',
                'abfaccounting.com', 'ABF-', 'Registered in England and Wales No. 15299101')
        ON CONFLICT (id) DO NOTHING`,
     );
