@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import {
@@ -18,7 +19,7 @@ import { startPullNowAction } from "@/lib/pull/actions";
 import type { PullSummary } from "@/lib/pull/status";
 import { cn } from "@/lib/cn";
 
-export type PullOverview = { latest: PullSummary | null; lastSuccess: PullSummary | null };
+export type PullOverview = { latest: PullSummary | null; lastSuccess: PullSummary | null; hasKey: boolean };
 type ModalKey = "pull" | "pull-failed" | null;
 
 type Ctx = {
@@ -196,6 +197,15 @@ function PullProgressModal({ open, onClose }: { open: boolean; onClose: () => vo
       }
     >
       {startError ? <Note tone="warning" icon={faTriangleExclamation}>{startError}</Note> : null}
+      {!overview.hasKey && !running ? (
+        <Note tone="warning" icon={faTriangleExclamation}>
+          No Companies House API key yet, so nothing is pulled. An admin can add it in{" "}
+          <Link href="/settings#companies-house" onClick={onClose} className="font-semibold underline">
+            Business settings
+          </Link>
+          .
+        </Note>
+      ) : null}
       <div className="flex flex-col gap-2">
         <div
           className="h-2 overflow-hidden rounded-full bg-mint"

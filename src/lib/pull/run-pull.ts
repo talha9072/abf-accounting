@@ -3,6 +3,7 @@ import { and, between, count, desc, eq, gte, inArray, isNull, sql } from "drizzl
 import { db, pool } from "@/lib/db";
 import { businessSettings, companies, exclusions, notifications, pulls, users } from "@/lib/db/schema";
 import { getOfficers, searchIncorporations, type ChSearchCompany } from "@/lib/companies-house/client";
+import { getCompaniesHouseKey } from "@/lib/companies-house/key";
 import { sendMail } from "@/lib/mail";
 import { purgeOldHistory } from "@/lib/history/retention";
 import { addDays, dateInTz, daysBetween, formatSaTime, todaysScheduleStart, UK_TZ } from "./dates";
@@ -38,6 +39,8 @@ export type PullTrigger = "schedule" | "retry" | "manual";
  * Decides whether a pull is due and runs it. Safe to call as often as you like.
  */
 export async function runScheduledPull(now = new Date()) {
+  // No key yet (fresh install): wait quietly instead of logging failed pulls and emailing alerts.
+  if (!(await getCompaniesHouseKey())) return { ran: false as const, reason: "no Companies House API key yet — add it in Business settings" };
   const due = await isPullDue(now);
   if (!due.due) return { ran: false as const, reason: due.reason };
   const started = await startPull({ trigger: due.trigger, wait: true, now });
@@ -396,7 +399,7 @@ async function notifyFailure(pullId: string, attempt: number, message: string) {
     .from(users)
     .where(and(eq(users.status, "active"), eq(users.emailOnPullFailure, true)));
 
-  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const base = (process.env.APP_URL?.trim() || "http://localhost:3000").replace(/\/$/, "");
   for (const r of recipients) {
     await sendMail({
       to: r.email,

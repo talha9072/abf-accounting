@@ -1,4 +1,5 @@
 import "server-only";
+import { getCompaniesHouseKey } from "./key";
 
 /**
  * Companies House Public Data API client (read-only).
@@ -69,9 +70,9 @@ function readRateHeaders(res: Response) {
 /* Core GET                                                            */
 /* ------------------------------------------------------------------ */
 
-function authHeader() {
-  const key = process.env.COMPANIES_HOUSE_API_KEY?.trim();
-  if (!key) throw new CompaniesHouseError("COMPANIES_HOUSE_API_KEY is not set.");
+async function authHeader() {
+  const key = await getCompaniesHouseKey();
+  if (!key) throw new CompaniesHouseError("The Companies House API key isn’t set — an admin can add it in Business settings.", 401);
   return "Basic " + Buffer.from(`${key}:`).toString("base64");
 }
 
@@ -85,7 +86,7 @@ export async function chGet<T>(path: string, params?: Record<string, string | nu
     await acquireSlot();
     try {
       const res = await fetch(url, {
-        headers: { Authorization: authHeader(), Accept: "application/json" },
+        headers: { Authorization: await authHeader(), Accept: "application/json" },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         cache: "no-store",
       });
@@ -94,7 +95,7 @@ export async function chGet<T>(path: string, params?: Record<string, string | nu
       if (res.ok) return (await res.json()) as T;
       if (res.status === 404) return null;
       if (res.status === 401 || res.status === 403) {
-        throw new CompaniesHouseError("Companies House rejected the API key (check COMPANIES_HOUSE_API_KEY).", res.status);
+        throw new CompaniesHouseError("Companies House rejected the API key — check it in Business settings.", res.status);
       }
       if (res.status === 429) {
         const reset = Number(res.headers.get("x-ratelimit-reset"));

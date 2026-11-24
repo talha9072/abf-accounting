@@ -437,3 +437,16 @@ export const businessSettings = pgTable("business_settings", {
   registrationLine: varchar("registration_line", { length: 400 }),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Keys ABF enters in Business settings (e.g. the Companies House API key) — never in the code
+ * or .env. AES-256-GCM encrypted with AUTH_ENCRYPTION_KEY; only the last 4 characters are kept
+ * in clear so the page can show which key is saved.
+ */
+export const appSecrets = pgTable("app_secrets", {
+  name: varchar("name", { length: 48 }).primaryKey(),
+  valueEnc: varchar("value_enc", { length: 600 }).notNull(),
+  hint: varchar("hint", { length: 8 }).notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: updatedAt(),
+});

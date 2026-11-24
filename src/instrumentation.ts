@@ -7,8 +7,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const mode = (process.env.PULL_SCHEDULER ?? "internal").toLowerCase();
   if (mode !== "internal") return;
-  if (!process.env.COMPANIES_HOUSE_API_KEY || !process.env.DATABASE_URL) {
-    console.warn("[pull-scheduler] not started — COMPANIES_HOUSE_API_KEY or DATABASE_URL missing");
+  // The Companies House key is entered in Business settings; each tick checks for it.
+  if (!process.env.DATABASE_URL) {
+    console.warn("[pull-scheduler] not started — DATABASE_URL missing");
     return;
   }
   const { startPullScheduler } = await import("./lib/pull/scheduler");

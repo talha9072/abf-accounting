@@ -96,19 +96,22 @@ export function Sidebar({ counts }: { counts: SidebarCounts }) {
 function PullStatusCard() {
   const { overview, running, open } = usePull();
   const latest = overview.latest;
-  const failed = latest?.status === "failed";
+  const noKey = !overview.hasKey && !running;
+  const failed = latest?.status === "failed" || noKey;
   const line = running
     ? `Pulling new companies · ${latest?.percent ?? 0}%`
-    : failed
-      ? `Last pull failed · ${latest?.timeLabel}`
-      : latest
-        ? `Connected · checked at ${latest.timeLabel}`
-        : "Not pulled yet · runs at 06:00";
+    : noKey
+      ? "API key not set · Business settings"
+      : failed
+        ? `Last pull failed · ${latest?.timeLabel}`
+        : latest
+          ? `Connected · checked at ${latest.timeLabel}`
+          : "Not pulled yet · runs at 06:00";
 
   return (
     <button
       type="button"
-      onClick={() => open(failed && !running ? "pull-failed" : "pull")}
+      onClick={() => open(failed && !running && !noKey ? "pull-failed" : "pull")}
       title="Companies House pull — open details"
       className="mt-auto flex flex-col gap-1.5 rounded-xl border border-white/12 bg-white/[0.06] px-4 py-3.5 text-left transition-colors hover:bg-white/[0.1]"
     >

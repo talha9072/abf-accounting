@@ -61,7 +61,7 @@ export function BusinessForm({ values, saved, updatedAt, canEdit }: { values: Va
         start(async () => {
           const r = await saveBusinessSettingsAction(data);
           setErrors(r.ok ? {} : (r.fieldErrors ?? {}));
-          toast({ message: r.message });
+          toast({ message: r.message, tone: r.ok ? "success" : "error" });
           if (r.ok) router.refresh();
         });
       }}

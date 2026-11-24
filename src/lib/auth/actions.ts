@@ -291,7 +291,7 @@ export async function forgotPasswordAction(_prev: FormState, formData: FormData)
     requestedIp: ip,
   });
 
-  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const base = (process.env.APP_URL?.trim() || "http://localhost:3000").replace(/\/$/, "");
   await sendMail({
     to: email,
     subject: "Reset your ABF New Companies password",

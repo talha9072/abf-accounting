@@ -1,10 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { faCircleCheck } from "@fortawesome/free-solid-svg-icons";
+import { faCircleCheck, faTriangleExclamation } from "@fortawesome/free-solid-svg-icons";
 import { Icon } from "./icon";
 
-type ToastInput = { message: ReactNode; actionLabel?: string; onAction?: () => void };
+/** tone "error" shows a warning icon instead of the green tick (default "success"). */
+type ToastInput = { message: ReactNode; tone?: "success" | "error"; actionLabel?: string; onAction?: () => void };
 type ToastItem = ToastInput & { id: number };
 
 const ToastContext = createContext<((t: ToastInput) => void) | null>(null);
@@ -44,8 +45,8 @@ function ToastView({ toast, onDone }: { toast: ToastItem; onDone: () => void }) 
       role="status"
       className="pointer-events-auto flex animate-toast-in items-center gap-3 rounded-xl bg-ink px-4 py-3.5 text-white shadow-[0_16px_40px_rgb(10_31_59/0.16)]"
     >
-      <span className="text-brand">
-        <Icon icon={faCircleCheck} size={16} />
+      <span className={toast.tone === "error" ? "text-[#f5a524]" : "text-brand"}>
+        <Icon icon={toast.tone === "error" ? faTriangleExclamation : faCircleCheck} size={16} />
       </span>
       <p className="min-w-0 flex-1 text-[13px] font-medium leading-[18px]">{toast.message}</p>
       {toast.actionLabel ? (

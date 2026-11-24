@@ -6,6 +6,8 @@ history of what was sent.
 
 Design source: Figma **ABF Accounting → 02 — New Companies Admin**.
 
+**Handover:** [docs/HANDOVER.md](docs/HANDOVER.md) (go-live, settings, decisions, what ABF still needs to provide) · **Staff guide:** [docs/USER-GUIDE.md](docs/USER-GUIDE.md) (how to use it every day, with screenshots).
+
 > **Status:** every screen runs on PostgreSQL — auth (with two-step sign-in), the
 > Companies House pull, New Companies, print runs, letter templates, history, notes,
 > notifications, My account and Business settings. Before go-live: fill in the SMTP
@@ -75,7 +77,7 @@ http://127.0.0.1:3000 instead — it's allowed in `next.config.ts` (`allowedDevO
 
 ## Companies House pull
 
-Every day at **06:00 South Africa time** (`Africa/Johannesburg`) the app pulls every company incorporated since the last successful pull, using the read-only Companies House REST API (`COMPANIES_HOUSE_API_KEY`).
+Every day at **06:00 South Africa time** (`Africa/Johannesburg`) the app pulls every company incorporated since the last successful pull, using the read-only Companies House REST API. The **key is entered in the app** (Business settings → Companies House, admins only): checked against Companies House, then stored AES-256-GCM encrypted with `AUTH_ENCRYPTION_KEY` in `app_secrets` (only the last 4 characters in clear; `src/lib/companies-house/key.ts`). `COMPANIES_HOUSE_API_KEY` in `.env` still works as a development fallback; a saved key always wins. With no key, the scheduler waits quietly (no failed pulls or alert emails) and the menu card says "API key not set". Checks: `npx tsx --conditions=react-server scripts/test-ch-key.ts`.
 
 1. **Fetch** — advanced company search, day by day, 5,000 per page. One day of overlap catches late-indexed companies; up to 14 missed days are caught up automatically.
 2. **Rules** — the 7 checks from the design (`src/lib/pull/eligibility.ts`): Ltd, LLP or limited by guarantee — never a CIC (Ashley, 20 Nov 2026; CICs found by Companies House subtype, or a name ending CIC / CBC; "c/o" addresses are NOT skipped and each company gets its own letter, even with the same director — also Ashley, 20 Nov 2026), complete UK address, not your own office, not a shared/agent address (≥ 5 companies at one address, or ≥ 8 at one postcode — virtual offices give each client its own "Office 1234" — in 14 days), not the Companies House default address, not excluded, not printed before. Results: `not_reviewed` (ready), `address_issue`, `excluded`, `skipped` + `skip_reason`.

@@ -2,6 +2,7 @@ import "server-only";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { pulls } from "@/lib/db/schema";
+import { getCompaniesHouseKey } from "@/lib/companies-house/key";
 import { formatDay, formatSaTime } from "./dates";
 
 export type PullSummary = {
@@ -77,12 +78,12 @@ function toSummary(row: PullRow): PullSummary {
   };
 }
 
-/** Latest pull (any status) and the latest successful one. */
-export async function getPullOverview(): Promise<{ latest: PullSummary | null; lastSuccess: PullSummary | null }> {
+/** Latest pull (any status), the latest successful one, and whether a Companies House key is set. */
+export async function getPullOverview(): Promise<{ latest: PullSummary | null; lastSuccess: PullSummary | null; hasKey: boolean }> {
   const [latest] = await db.select().from(pulls).orderBy(desc(pulls.startedAt)).limit(1);
   const [ok] =
     latest?.status === "succeeded"
       ? [latest]
       : await db.select().from(pulls).where(eq(pulls.status, "succeeded")).orderBy(desc(pulls.finishedAt)).limit(1);
-  return { latest: latest ? toSummary(latest) : null, lastSuccess: ok ? toSummary(ok) : null };
+  return { latest: latest ? toSummary(latest) : null, lastSuccess: ok ? toSummary(ok) : null, hasKey: !!(await getCompaniesHouseKey()) };
 }
