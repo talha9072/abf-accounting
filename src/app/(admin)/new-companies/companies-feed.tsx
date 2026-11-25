@@ -115,7 +115,9 @@ export function CompaniesFeed({
   const hrefWith = (patch: Record<string, string | number | null>) => {
     const sp = new URLSearchParams(searchParams.toString());
     for (const [k, v] of Object.entries(patch)) {
-      if (v === null || v === "" || v === "all" || (k === "inc" && v === "since-last") || (k === "page" && v === 1) || (k === "per" && v === 50))
+      // "all" is the default for every filter except Incorporated, whose default is "since-last"
+      // (so inc=all — "Any date" — has to stay in the URL).
+      if (v === null || v === "" || (v === "all" && k !== "inc") || (k === "inc" && v === "since-last") || (k === "page" && v === 1) || (k === "per" && v === 50))
         sp.delete(k);
       else sp.set(k, String(v));
     }
