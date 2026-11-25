@@ -103,9 +103,11 @@ export default async function CompanyOverviewPage({ params }: PageProps<"/new-co
               ? "Excluded — it won’t get a letter"
               : c.state === "skipped" && c.skipReason === "manual"
                 ? "Skipped by your team — it won’t get a letter"
-                : passedAll
-                  ? `Passed ${c.passedCount} of ${c.checks.length}${c.state === "added" ? " — included in today’s print run" : " — ready for a print run"}`
-                  : `Passed ${c.passedCount} of ${c.checks.length}${c.state === "address_issue" ? " — fix the address to send a letter" : " — no letter"}`}
+                : (c.state === "printed" || c.state === "posted") && passedAll
+                  ? "Letter sent — this company won’t get another one"
+                  : passedAll
+                    ? `Passed ${c.passedCount} of ${c.checks.length}${c.state === "added" ? " — included in today’s print run" : " — ready for a print run"}`
+                    : `Passed ${c.passedCount} of ${c.checks.length}${c.state === "address_issue" ? " — fix the address to send a letter" : " — no letter"}`}
           </p>
         </Card>
 

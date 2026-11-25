@@ -284,7 +284,9 @@ export async function getCompany(number: string) {
   // Rule results are saved at pull time; reflect later changes made by the team.
   const live: Partial<Record<(typeof RULES)[number]["key"], boolean>> = {
     not_excluded: c.letterState !== "excluded",
-    not_printed_before: c.letterState !== "printed" && c.letterState !== "posted",
+    // Once its own letter has gone out, show the rule as it was when the letter was chosen (passed),
+    // not as a failure — the summary line says "Letter sent" instead.
+    ...(c.letterState === "printed" || c.letterState === "posted" ? {} : { not_printed_before: true }),
     ...(c.postingAddress ? { address_complete: true } : {}),
   };
   const checks = RULES.map((r) => ({ key: r.key, label: r.label, passed: live[r.key] ?? c.eligibility?.[r.key] ?? false }));
